@@ -1,6 +1,10 @@
 #![no_std]
 #![no_main]
 
+use embedded_graphics::Drawable;
+use embedded_graphics::geometry::Point;
+use embedded_graphics::image::{ImageRaw, Image};
+use embedded_graphics::pixelcolor::BinaryColor;
 use panic_halt as _;
 
 pub use atsamd_hal as hal;
@@ -12,7 +16,11 @@ pub use hal::pac;
 use hal::clock::GenericClockController;
 use hal::delay::Delay;
 use hal::pac::{CorePeripherals, Peripherals};
-use hal::{prelude::*, gpio};
+use hal::{prelude::*, gpio, sercom::i2c };
+use ssd1306::mode::DisplayConfig;
+use ssd1306::rotation::DisplayRotation;
+use ssd1306::size::DisplaySize128x64;
+use ssd1306::{I2CDisplayInterface, Ssd1306};
 
 
 #[entry]
@@ -26,6 +34,26 @@ fn main() -> ! {
         &mut peripherals.NVMCTRL,
     );
     let pins = gpio::Pins::new(peripherals.PORT);
+
+
+    let gclk0 = clocks.gclk0();
+    let sercom0_clock = &clocks.sercom0_core(&gclk0).unwrap();
+    let i2c = i2c::Config::new(&peripherals.PM, peripherals.SERCOM0, i2c::Pads::new(pins.pa08, pins.pa09), sercom0_clock.freq())
+        .baud(100.kHz())
+        .enable();
+
+    let interface = I2CDisplayInterface::new(i2c);
+    let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
+        .into_buffered_graphics_mode();
+    display.init().unwrap();
+
+    let raw: ImageRaw<BinaryColor> = ImageRaw::new(include_bytes!("../rust.raw"), 64);
+
+    let im = Image::new(&raw, Point::new(32, 0));
+
+    im.draw(&mut display).unwrap();
+
+    display.flush().unwrap();
 
     let mut led = pins.pb30.into_push_pull_output();
     let mut delay = Delay::new(core.SYST, &mut clocks);
