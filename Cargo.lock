@@ -17,11 +17,9 @@ dependencies = [
 [[package]]
 name = "atsamd-hal"
 version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b73296d570757d7701a102d1186ffc5120ed941fbe1112e88391db1277b3b06"
 dependencies = [
  "aes",
- "atsamd21j",
+ "atsamd11d",
  "bitfield",
  "bitflags",
  "cipher",
@@ -41,13 +39,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "atsamd21j"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5713aaed35d6f38adfd1ceabb43492d6ff0674714b2248e4c5f33beeed225f4"
+name = "atsamd11d"
+version = "0.13.0"
 dependencies = [
  "cortex-m",
  "cortex-m-rt",
+ "critical-section",
  "vcell",
 ]
 

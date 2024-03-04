@@ -6,7 +6,7 @@ edition = "2021"
 
 # for cargo flash
 [package.metadata]
-chip = "ATSAMD21J18A"
+chip = "ATSAMD11D14A"
 
 [dependencies.cortex-m-rt]
 version = "0.7"
@@ -16,9 +16,10 @@ version = "0.7"
 features = ["critical-section-single-core", "inline-asm"]
 
 [dependencies.atsamd-hal]
+path = "../../rust/atsamd/hal"
 version = "0.16.0"
 default-features = false
-features = ["samd21j-rt"]
+features = ["samd11d-rt"]
 
 [dependencies]
 embedded-graphics = "0.8.1"

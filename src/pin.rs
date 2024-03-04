@@ -52,7 +52,7 @@ impl<P: PinId> IoPin<P> {
     fn group_offset(&self) -> usize {
         match self.id().group {
             DynGroup::A => 0,
-            DynGroup::B => 1,
+            //DynGroup::B => 1,
             //DynGroup::C => 2,
             //DynGroup::D => 3,
         }

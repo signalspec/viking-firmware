@@ -40,10 +40,11 @@ fn main() -> ! {
     let pins = gpio::Pins::new(peripherals.PORT);
 
     debug_rtt_init_print!();
+    rprintln!("init");
 
     let gclk0 = clocks.gclk0();
-    let sercom0_clock = &clocks.sercom0_core(&gclk0).unwrap();
-    let i2c = i2c::Config::new(&peripherals.PM, peripherals.SERCOM0, i2c::Pads::new(pins.pa08, pins.pa09), sercom0_clock.freq())
+    let sercom1_clock = &clocks.sercom1_core(&gclk0).unwrap();
+    let i2c = i2c::Config::new(&peripherals.PM, peripherals.SERCOM1, i2c::Pads::new(pins.pa22, pins.pa23), sercom1_clock.freq())
         .baud(100.kHz())
         .enable();
 
@@ -62,11 +63,16 @@ fn main() -> ! {
 
     let mut delay = delay::Delay::<48_000_000>::new(core.SYST);
 
-    let mut w1 = onewire::Onewire::new(delay.clone(), pins.pa04);
+    //let mut w1 = onewire::Onewire::new(delay.clone(), pins.pa04);
+
+    let mut led = pins.pa03.into_push_pull_output();
 
     loop {
-        let value = onewire::ds18b20_read(&mut w1);
-        rprintln!("{}", value * 100 / 16);
+        //let value = onewire::ds18b20_read(&mut w1);
+        //rprintln!("{}", value * 100 / 16);
+        led.set_high().unwrap();
+        delay.delay_ms(200u32);
+        led.set_low().unwrap();
         delay.delay_ms(200u32);
     }
 }
