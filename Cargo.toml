@@ -1,12 +1,16 @@
 [package]
-name = "sam0test"
+name = "viking-sam-usb"
 version = "0.1.0"
 license = "MIT OR Apache-2.0"
 edition = "2021"
 
 # for cargo flash
 [package.metadata]
-chip = "ATSAMD11D14A"
+chip = "ATSAMD21J18"
+
+[dependencies.lilos]
+git = "https://github.com/kevinmehall/lilos.git"
+rev = "81c2fea2c9cdbcd05aa4de0eaddfdb65e179b3af"
 
 [dependencies.cortex-m-rt]
 version = "0.7"
@@ -16,16 +20,21 @@ version = "0.7"
 features = ["critical-section-single-core", "inline-asm"]
 
 [dependencies.atsamd-hal]
-path = "../../rust/atsamd/hal"
-version = "0.16.0"
+git = "https://github.com/atsamd-rs/atsamd"
+rev = "ecf2f583e15d4cadf798e31c7de425f6e6b89680"
 default-features = false
-features = ["samd11d-rt"]
+features = ["samd21j-rt"]
+
+[dependencies.usb]
+git = "https://github.com/kevinmehall/rust-usb.git"
+rev = "a343b6f3c9de025c365202a2301d46f51adf18bf"
 
 [dependencies]
-embedded-graphics = "0.8.1"
-panic-halt = "0.2"
-rtt-target = "0.5.0"
-ssd1306 = "0.8.4"
+defmt = "0.3.6"
+defmt-rtt = "0.4.0"
+futures-util = { version = "0.3.30", default-features = false, features = ["async-await", "async-await-macro"] }
+panic-probe = { version = "0.3" }
+pin-project-lite = "0.2.14"
 
 [profile.dev]
 incremental = false
