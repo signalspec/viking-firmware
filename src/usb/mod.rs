@@ -1,7 +1,7 @@
 mod hardware;
 pub mod descriptors;
 
-use core::{convert::Infallible, future::Future, mem, pin::Pin, sync::atomic::{compiler_fence, Ordering}, task::{Context, Poll}};
+use core::{convert::Infallible, future::Future, marker::PhantomData, mem, ops::{Deref, DerefMut}, pin::Pin, sync::atomic::{compiler_fence, Ordering}, task::{Context, Poll}};
 use core::pin::pin;
 
 use atsamd_hal::{calibration::{usb_transn_cal, usb_transp_cal, usb_trim_cal}, clock::UsbClock, gpio::{AlternateG, AnyPin, PA24, PA25}, pac::{usb::DEVICE, Interrupt, USB, interrupt}};
@@ -16,11 +16,25 @@ static EP_RAM: [[EndpointBank; 2]; 8] = unsafe { mem::zeroed() };
 
 
 #[repr(C, align(4))]
-struct UsbBuffer<const SIZE: usize>([u8; SIZE]);
+pub struct UsbBuffer<const SIZE: usize>([u8; SIZE]);
 
 impl<const SIZE: usize> UsbBuffer<SIZE> {
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         UsbBuffer([0; SIZE])
+    }
+}
+
+impl<const SIZE: usize> Deref for UsbBuffer<SIZE> {
+    type Target = [u8; SIZE];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<const SIZE: usize> DerefMut for UsbBuffer<SIZE> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
@@ -89,7 +103,7 @@ impl<'a> ControlIn<'a> {
             let (pkt, remaining) = data.split_at(data.len().min(buf.len()));
             
             buf[..pkt.len()].copy_from_slice(pkt);
-            self.usb.transfer_in(0x80, PacketSize::Size64, buf.as_ptr(), pkt.len(), false).await;
+            transfer_in(0x80, self.usb.ep(0x80), self.usb.ep_ram(0x80), PacketSize::Size64, buf.as_ptr(), pkt.len(), false).await;
 
             if pkt.len() < 64 || (remaining.len() == 0 && is_full) {
                 break;
@@ -100,7 +114,7 @@ impl<'a> ControlIn<'a> {
 
         debug!("data phase complete");
         let buf = unsafe { &mut CONTROL_BUF.0 };
-        self.usb.transfer_out(0, PacketSize::Size64, buf.as_mut_ptr(), 64).await;
+        transfer_out(0, self.usb.ep(0x0), self.usb.ep_ram(0x0), PacketSize::Size64, buf.as_mut_ptr(), 64).await;
         debug!("status phase complete");
     }
 }
@@ -124,7 +138,7 @@ impl<'a> ControlOut<'a> {
         let buf = unsafe { &mut CONTROL_BUF.0 };
         //self.usb.transfer_out(0, PacketSize::Size64, buf.as_mut_ptr(), 64).await;
         //debug!("data stage complete");
-        self.usb.transfer_in(0x80, PacketSize::Size64, buf.as_ptr(), 0, false).await;
+        transfer_in(0x80, self.usb.ep(0x80), self.usb.ep_ram(0x80), PacketSize::Size64, buf.as_ptr(), 0, false).await;
         debug!("status stage complete");
     }
 
@@ -233,11 +247,11 @@ pub trait Handler {
         None
     }
 
-    async fn set_configuration(&self, cfg: u8) -> Result<(), ()> {
+    async fn set_configuration(&self, cfg: u8, _usb: &Usb) -> Result<(), ()> {
         if cfg == 1 { Ok(()) } else { Err(()) }
     }
 
-    async fn handle_control<'a>(&self, req: Setup<'a>) {
+    async fn handle_control<'a>(&self, req: Setup<'a>, usb: &Usb) {
         use ControlType::*;
         use Recipient::*;
         use ControlData::*;
@@ -275,7 +289,7 @@ pub trait Handler {
             }
             Setup { ty: Standard, recipient: Device, request: SET_CONFIGURATION, value, data: Out(data), .. } => {
                 debug!("set configuration {}", value);
-                match self.set_configuration(value as u8).await {
+                match self.set_configuration(value as u8, usb).await {
                     Ok(_) => data.accept().await,
                     Err(_) => data.reject(),
                 }
@@ -447,7 +461,7 @@ impl Usb {
                 }
                 setup = self.receive_setup().fuse() => {
                     if let Ok(setup) = Setup::parse(self, setup) {
-                        inner.set(State::Control { f: h.handle_control(setup) });
+                        inner.set(State::Control { f: h.handle_control(setup, &self) });
                     } else {
                         inner.set(State::Idle);
                         self.stall_ep0();
@@ -465,76 +479,86 @@ impl Usb {
         })
     }
 
-    pub async fn transfer_in(&self, ep: u8, packet_size: PacketSize, ptr: *const u8, len: usize, zlp: bool) {
-        debug_assert!(ep & 0x80 == 0x80);
-
-        self.ep_ram(ep).prepare_in(packet_size, ptr.cast_mut(), len, zlp);
-
-        // Writing to start the transfer gives hardware control of the buffer
-        compiler_fence(Ordering::Release);
-
-        let ep_reg = self.ep(ep);
-
-        ep_reg.epintflag.write(|w| {
-            w.trcpt1().set_bit()
+    pub fn configure_ep_in<const EP: u8>(&self) -> Endpoint<In, EP> {
+        self.ep(EP).epcfg.modify(|_, w| {
+            w.eptype1().variant(3)
         });
-        ep_reg.epstatusset.write(|w| {
+        Endpoint { _d: PhantomData } 
+    }
+
+    pub fn configure_ep_out<const EP: u8>(&self) -> Endpoint<Out, EP> {
+        self.ep(EP).epcfg.modify(|_, w| {
+            w.eptype0().variant(3)
+        });
+        Endpoint { _d: PhantomData } 
+    }
+}
+
+pub async fn transfer_in(ep: u8, ep_reg: &DEVICE_EP, ep_ram: &EndpointBank, packet_size: PacketSize, ptr: *const u8, len: usize, zlp: bool) {
+    ep_ram.prepare_in(packet_size, ptr.cast_mut(), len, zlp);
+
+    // Writing to start the transfer gives hardware control of the buffer
+    compiler_fence(Ordering::Release);
+
+    ep_reg.epintflag.write(|w| {
+        w.trcpt1().set_bit()
+    });
+    ep_reg.epstatusset.write(|w| {
+        w.bk1rdy().set_bit()
+    });
+    ep_reg.epintenset.write(|w| {
+        w.trcpt1().set_bit()
+    });
+
+    NOTIFY_EP_IN[(ep & 0b111) as usize].until(|| {
+        ep_reg.epintflag.read().trcpt1().bit_is_set()
+    }).on_cancel(|| {
+        ep_reg.epstatusclr.write(|w| {
             w.bk1rdy().set_bit()
         });
-        ep_reg.epintenset.write(|w| {
-            w.trcpt1().set_bit()
-        });
-
-        NOTIFY_EP_IN[(ep & 0b111) as usize].until(|| {
-            ep_reg.epintflag.read().trcpt1().bit_is_set()
-        }).on_cancel(|| {
-            ep_reg.epstatusclr.write(|w| {
-                w.bk1rdy().set_bit()
-            });
-            ep_reg.epintenclr.write(|w| {
-                w.trcpt0().set_bit()
-            });
-        }).await;
-
-        // Reading trcpt1 means the hardware is done reading the buffer
-        compiler_fence(Ordering::Acquire)
-    }
-
-    pub async fn transfer_out(&self, ep: u8, packet_size: PacketSize, ptr: *mut u8, len: usize) {
-        debug_assert!(ep & 0x80 == 0x00);
-
-        self.ep_ram(ep).prepare_out(packet_size, ptr, len);
-
-        // Writing to start the transfer gives hardware control of the buffer
-        compiler_fence(Ordering::Release);
-
-        let ep_reg = self.ep(ep);
-
-        ep_reg.epintflag.write(|w| {
-            w.trcpt0().set_bit();
-            w.trfail0().set_bit()
-        });
-        ep_reg.epstatusclr.write(|w| {
-            w.bk0rdy().set_bit()
-        });
-        ep_reg.epintenset.write(|w| {
+        ep_reg.epintenclr.write(|w| {
             w.trcpt0().set_bit()
         });
+    }).await;
 
-        NOTIFY_EP_OUT[(ep & 0b111) as usize].until(|| {
-            ep_reg.epintflag.read().trcpt0().bit_is_set()
-        }).on_cancel(|| {
-            ep_reg.epstatusset.write(|w| {
-                w.bk0rdy().set_bit()
-            });
-            ep_reg.epintenclr.write(|w| {
-                w.trcpt0().set_bit()
-            });
-        }).await;
+    // Reading trcpt1 means the hardware is done reading the buffer
+    compiler_fence(Ordering::Acquire)
+}
 
-        // Reading trcpt0 means the hardware is done reading the buffer
-        compiler_fence(Ordering::Acquire)
-    }
+pub async fn transfer_out(ep: u8, ep_reg: &DEVICE_EP, ep_ram: &EndpointBank, packet_size: PacketSize, ptr: *mut u8, len: usize) -> usize {
+    debug_assert!(ep & 0x80 == 0x00);
+
+    ep_ram.prepare_out(packet_size, ptr, len);
+
+    // Writing to start the transfer gives hardware control of the buffer
+    compiler_fence(Ordering::Release);
+
+    ep_reg.epintflag.write(|w| {
+        w.trcpt0().set_bit();
+        w.trfail0().set_bit()
+    });
+    ep_reg.epstatusclr.write(|w| {
+        w.bk0rdy().set_bit()
+    });
+    ep_reg.epintenset.write(|w| {
+        w.trcpt0().set_bit()
+    });
+
+    NOTIFY_EP_OUT[(ep & 0b111) as usize].until(|| {
+        ep_reg.epintflag.read().trcpt0().bit_is_set()
+    }).on_cancel(|| {
+        ep_reg.epstatusset.write(|w| {
+            w.bk0rdy().set_bit()
+        });
+        ep_reg.epintenclr.write(|w| {
+            w.trcpt0().set_bit()
+        });
+    }).await;
+
+    // Reading trcpt0 means the hardware is done reading the buffer
+    compiler_fence(Ordering::Acquire);
+
+    ep_ram.out_len()
 }
 
 static NOTIFY_BUS_EVENT: Notify = Notify::new();
@@ -544,6 +568,43 @@ const NOTIFY: Notify = Notify::new();
 static NOTIFY_EP_IN: [Notify; 8] = [NOTIFY; 8];
 static NOTIFY_EP_OUT: [Notify; 8] = [NOTIFY; 8];
 
+pub struct In;
+pub struct Out;
+
+pub struct Endpoint<D, const EP: u8> {
+    _d: PhantomData<D>,
+}
+
+impl<D, const EP: u8> Endpoint<D, EP> {
+    fn usb(&self) -> &DEVICE {
+        unsafe { (*USB::ptr()).device() }
+    }
+
+    fn ep(&self) -> &DEVICE_EP {
+        ep_regs(self.usb(), EP & 0b111)
+    }
+}
+
+impl<const EP: u8> Endpoint<Out, EP> {
+    fn ep_ram(&self) -> &EndpointBank {
+        &EP_RAM[(EP & 0b111) as usize][0]
+    }
+
+    pub async fn transfer<const SIZE: usize>(&self, buf: &mut UsbBuffer<SIZE>) -> usize {
+        transfer_out(EP, self.ep(), self.ep_ram(), PacketSize::Size64, buf.0.as_mut_ptr(), buf.0.len()).await
+    }
+}
+
+impl<const EP: u8> Endpoint<In, EP> {
+    fn ep_ram(&self) -> &EndpointBank {
+        &EP_RAM[(EP & 0b111) as usize][1]
+    }
+
+    pub async fn transfer<const SIZE: usize>(&self, buf: &UsbBuffer<SIZE>, len: usize, zlp: bool) {
+        assert!(len < SIZE);
+        transfer_in(EP, self.ep(), self.ep_ram(), PacketSize::Size64, buf.0.as_ptr(), len, zlp).await
+    }
+}
 
 #[interrupt]
 fn USB() {

@@ -2,9 +2,17 @@
 #![no_main]
 #![allow(unused)] // TODO
 
+use core::borrow::BorrowMut;
+use core::cell::{Cell, RefCell, UnsafeCell};
+use core::convert::Infallible;
+use core::future::{Future, poll_fn};
+use core::ops::Not;
 use core::pin::pin;
+use core::ptr::addr_of_mut;
+use core::task::Poll;
 
 use hal::gpio::{Alternate, Pin, C};
+use lilos::exec::Notify;
 use lilos::time::{sleep_for, Millis};
 use panic_probe as _;
 use defmt_rtt as _;
@@ -22,6 +30,8 @@ use hal::{gpio, prelude::*, serial_number };
 use defmt::info;
 
 mod usb;
+
+static mut BULK_BUF: UsbBuffer<128> = UsbBuffer::new();
 
 #[entry]
 fn main() -> ! {
@@ -54,8 +64,14 @@ fn main() -> ! {
     let mut usb = usb::Usb::new(&usb_clock, pins.pa24, pins.pa25, peripherals.USB);
     usb.attach();
 
-    struct Handler;
-    impl usb::Handler for Handler {
+    let bulk_eps = Cell::new(None);
+    let bulk_eps_notify = Notify::new();
+
+    struct Handler<'a> {
+        bulk_eps: &'a Cell<Option<(usb::Endpoint<Out, 0x01>, usb::Endpoint<In, 0x82>)>>,
+        bulk_eps_notify: &'a Notify,
+    }
+    impl usb::Handler for Handler<'_> {
         fn get_descriptor(&self, kind: u8, index: u8) -> Option<&[u8]> {
             use ::usb::descriptor_type::{CONFIGURATION, DEVICE};
             match (kind, index) {
@@ -74,9 +90,23 @@ fn main() -> ! {
                 _ => None,
             }
         }
+
+        async fn set_configuration(&self, cfg: u8, usb: &Usb) -> Result<(), ()> {
+            if cfg == 1 {
+                let ep_out = usb.configure_ep_out::<0x01>();
+                let ep_in = usb.configure_ep_in::<0x82>();
+
+                self.bulk_eps.set(Some((ep_out, ep_in)));
+                self.bulk_eps_notify.notify();
+
+                Ok(())
+            } else {
+                Err(())
+            }
+        }
     }
 
-    let usb_task = pin!(usb.handle(Handler));
+    let usb_task = pin!(usb.handle(Handler { bulk_eps: &bulk_eps, bulk_eps_notify: &bulk_eps_notify }));
 
     let led_task = pin!(async {
         loop {
@@ -88,17 +118,34 @@ fn main() -> ! {
         }
     });
 
+    let bulk_task = pin!(async {
+        loop {
+            let buf = unsafe { &mut *addr_of_mut!(BULK_BUF) };
+            let (ep_out, ep_in) = bulk_eps_notify.until(|| bulk_eps.take() ).await;
+
+            loop {
+                let len = ep_out.transfer(buf).await;
+                info!("bulk read {}: {:?}", len, &buf[..]);
+                ep_in.transfer(buf, len, true).await;
+                info!("bulk write complete");
+            }
+        }
+    });
+
     lilos::time::initialize_sys_tick(
         &mut core.SYST,
         48_000_000,
     );
     lilos::exec::run_tasks(
-        &mut [led_task, usb_task],
+        &mut [led_task, usb_task, bulk_task],
         lilos::exec::ALL_TASKS,
     );
 }
 
 use usb::descriptors::{Config, Device, Endpoint, Interface, StringDecriptor};
+use usb::{In, UsbBuffer};
+
+use crate::usb::{Out, Usb};
 
 const STRING_MFG: u8 = 1;
 const STRING_PRODUCT: u8 = 2;

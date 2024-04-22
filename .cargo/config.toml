@@ -13,9 +13,6 @@ rustflags = [
   "-C", "link-arg=-Tlink.x",
   "-C", "link-arg=-Tdefmt.x",
 
-  # https://github.com/rust-embedded/cortex-m/discussions/503
-  "-C", "llvm-args=--enable-machine-outliner=never",
-
   "-C", "linker-plugin-lto=y",
   "-C", "lto=fat",
 ]
