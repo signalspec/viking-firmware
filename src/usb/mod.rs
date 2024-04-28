@@ -252,50 +252,7 @@ pub trait Handler {
     }
 
     async fn handle_control<'a>(&self, req: Setup<'a>, usb: &Usb) {
-        use ControlType::*;
-        use Recipient::*;
-        use ControlData::*;
-        use usb::standard_request::{GET_DESCRIPTOR, SET_ADDRESS, SET_CONFIGURATION, GET_STATUS};
-        use usb::descriptor_type;
-        debug!("control request: {:?} {:?} {:02x} {:04x} {:04x} {:?}", req.ty, req.recipient, req.request, req.value, req.index, &req.data);
-        match req {
-            Setup { ty: Standard, request: GET_STATUS, data: In(data), .. } => {
-                data.respond(&[0, 0]).await;
-            }
-            Setup { ty: Standard, recipient: Device, request: GET_DESCRIPTOR, value, index, data: In(data) } => {
-                let lang = index;
-                let kind = (value >> 8) as u8;
-                let index = (value & 0xFF) as u8;
-                if kind == descriptor_type::STRING {
-                    if let Some(s) = self.get_string_descriptor(index, lang) {
-                        data.respond(s.bytes()).await;
-                    } else {
-                        data.reject();
-                        return;
-                    }
-                } else {
-                    if let Some(descriptor) = self.get_descriptor(kind, index) {
-                        debug!("returning descriptor");
-                        data.respond(descriptor).await;
-                    } else {
-                        debug!("descriptor not found");
-                        data.reject();
-                    }
-                }
-            }
-            Setup { ty: Standard, recipient: Device, request: SET_ADDRESS, value, data: Out(data), .. } => {
-                debug!("set address {}", value);
-                data.accept_and_set_address(value as u8).await;
-            }
-            Setup { ty: Standard, recipient: Device, request: SET_CONFIGURATION, value, data: Out(data), .. } => {
-                debug!("set configuration {}", value);
-                match self.set_configuration(value as u8, usb).await {
-                    Ok(_) => data.accept().await,
-                    Err(_) => data.reject(),
-                }
-            }
-            unknown => unknown.reject()
-        }
+        req.reject();
     }
 }
 
@@ -461,7 +418,7 @@ impl Usb {
                 }
                 setup = self.receive_setup().fuse() => {
                     if let Ok(setup) = Setup::parse(self, setup) {
-                        inner.set(State::Control { f: h.handle_control(setup, &self) });
+                        inner.set(State::Control { f: self.handle_control(setup, &h) });
                     } else {
                         inner.set(State::Idle);
                         self.stall_ep0();
@@ -469,6 +426,53 @@ impl Usb {
                 },
                 _ = inner => {}
             }
+        }
+    }
+
+    async fn handle_control<'a>(&self, req: Setup<'a>, h: &impl Handler) {
+        use ControlType::*;
+        use Recipient::*;
+        use ControlData::*;
+        use usb::standard_request::{GET_DESCRIPTOR, SET_ADDRESS, SET_CONFIGURATION, GET_STATUS};
+        use usb::descriptor_type;
+        debug!("control request: {:?} {:?} {:02x} {:04x} {:04x} {:?}", req.ty, req.recipient, req.request, req.value, req.index, &req.data);
+        match req {
+            Setup { ty: Standard, request: GET_STATUS, data: In(data), .. } => {
+                data.respond(&[0, 0]).await;
+            }
+            Setup { ty: Standard, recipient: Device, request: GET_DESCRIPTOR, value, index, data: In(data) } => {
+                let lang = index;
+                let kind = (value >> 8) as u8;
+                let index = (value & 0xFF) as u8;
+                if kind == descriptor_type::STRING {
+                    if let Some(s) = h.get_string_descriptor(index, lang) {
+                        data.respond(s.bytes()).await;
+                    } else {
+                        data.reject();
+                        return;
+                    }
+                } else {
+                    if let Some(descriptor) = h.get_descriptor(kind, index) {
+                        debug!("returning descriptor");
+                        data.respond(descriptor).await;
+                    } else {
+                        debug!("descriptor not found");
+                        data.reject();
+                    }
+                }
+            }
+            Setup { ty: Standard, recipient: Device, request: SET_ADDRESS, value, data: Out(data), .. } => {
+                debug!("set address {}", value);
+                data.accept_and_set_address(value as u8).await;
+            }
+            Setup { ty: Standard, recipient: Device, request: SET_CONFIGURATION, value, data: Out(data), .. } => {
+                debug!("set configuration {}", value);
+                match h.set_configuration(value as u8, self).await {
+                    Ok(_) => data.accept().await,
+                    Err(_) => data.reject(),
+                }
+            }
+            other => h.handle_control(other, self).await
         }
     }
 

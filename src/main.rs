@@ -6,6 +6,7 @@ use core::borrow::BorrowMut;
 use core::cell::{Cell, RefCell, UnsafeCell};
 use core::convert::Infallible;
 use core::future::{Future, poll_fn};
+use core::marker::PhantomData;
 use core::ops::Not;
 use core::pin::pin;
 use core::ptr::addr_of_mut;
@@ -27,11 +28,14 @@ use hal::clock::GenericClockController;
 use hal::pac::{CorePeripherals, Peripherals};
 use hal::{gpio, prelude::*, serial_number };
 
-use defmt::info;
+use defmt::{error, info};
 
 mod usb;
+mod viking;
+mod viking_sam0;
 
-static mut BULK_BUF: UsbBuffer<128> = UsbBuffer::new();
+static mut BULK_OUT_BUF: UsbBuffer<128> = UsbBuffer::new();
+static mut BULK_IN_BUF: UsbBuffer<128> = UsbBuffer::new();
 
 #[entry]
 fn main() -> ! {
@@ -57,7 +61,7 @@ fn main() -> ! {
         w.usb_().set_bit()
     });
 
-    let mut led = pins.pb30.into_push_pull_output();
+    //let mut led = pins.pb30.into_push_pull_output();
 
     let usb_clock = &clocks.usb(&gclk0).unwrap();
 
@@ -67,9 +71,12 @@ fn main() -> ! {
     let bulk_eps = Cell::new(None);
     let bulk_eps_notify = Notify::new();
 
+    let viking = RefCell::new(viking_impl::State::new());
+
     struct Handler<'a> {
         bulk_eps: &'a Cell<Option<(usb::Endpoint<Out, 0x01>, usb::Endpoint<In, 0x82>)>>,
         bulk_eps_notify: &'a Notify,
+        viking: &'a RefCell<viking_impl::State>,
     }
     impl usb::Handler for Handler<'_> {
         fn get_descriptor(&self, kind: u8, index: u8) -> Option<&[u8]> {
@@ -104,11 +111,71 @@ fn main() -> ! {
                 Err(())
             }
         }
+
+        async fn handle_control<'a>(&self, req: Setup<'a>, usb: &Usb) {
+            use usb::ControlType::*;
+            use usb::Recipient::*;
+            use usb::ControlData::{In, Out};
+
+            pub const I_VIKING: u16 = INTF_VIKING as u16;
+
+            use viking_protocol::request::{CONFIGURE_MODE, DESCRIBE_MODE, LIST_MODES, LIST_RESOURCES};
+
+            match req {
+                Setup { ty: Vendor, recipient: Interface, index: I_VIKING, request: LIST_RESOURCES, data: In(data), .. } => {
+                    data.respond(viking_impl::State::RESOURCE_NAMES.as_bytes()).await;
+                }
+
+                Setup { ty: Vendor, recipient: Interface, index: I_VIKING, value, request: LIST_MODES, data: In(data), .. } => {
+                    let resource = (value >> 8) as u8;
+                    if let Some(modes) = viking_impl::State::mode_names(resource) {
+                        data.respond(modes.as_bytes()).await;
+                    } else {
+                        data.reject();
+                    }
+                }
+
+                Setup { ty: Vendor, recipient: Interface, index: I_VIKING, value, request: DESCRIBE_MODE, data: In(data), .. } => {
+                    let resource = (value >> 8) as u8;
+                    let mode = (value & 0xff) as u8;
+                    if let Some(mode) = viking_impl::State::describe(resource, mode) {
+                        data.respond(mode).await;
+                    } else {
+                        data.reject();
+                    }
+                }
+
+                Setup { ty: Vendor, recipient: Interface, index: I_VIKING, value, request: CONFIGURE_MODE, data: Out(data), .. } => {
+                    let resource = (value >> 8) as u8;
+                    let mode = (value & 0xff) as u8;
+                    info!("configure {} {}", resource, mode);
+
+                    let Ok(mut resources) = self.viking.try_borrow_mut() else {
+                        error!("busy");
+                        data.reject();
+                        return;
+                    };
+
+                    if resources.configure(resource, mode, &[]).await.is_ok() {
+                        data.accept().await;
+                    } else {
+                        error!("configure failed");
+                        data.reject();
+                    }
+                }
+
+                unknown => unknown.reject(),
+            }
+        }
     }
 
-    let usb_task = pin!(usb.handle(Handler { bulk_eps: &bulk_eps, bulk_eps_notify: &bulk_eps_notify }));
+    let usb_task = pin!(usb.handle(Handler {
+        bulk_eps: &bulk_eps,
+        bulk_eps_notify: &bulk_eps_notify,
+        viking: &viking
+    }));
 
-    let led_task = pin!(async {
+    /*let led_task = pin!(async {
         loop {
             led.set_high().unwrap();
             sleep_for(Millis(1000)).await;
@@ -116,17 +183,25 @@ fn main() -> ! {
             sleep_for(Millis(1000)).await;
             info!("blink");
         }
-    });
+    });*/
 
     let bulk_task = pin!(async {
         loop {
-            let buf = unsafe { &mut *addr_of_mut!(BULK_BUF) };
+            let buf_out = unsafe { &mut *addr_of_mut!(BULK_OUT_BUF) };
+            let buf_in = unsafe { &mut *addr_of_mut!(BULK_IN_BUF) };
             let (ep_out, ep_in) = bulk_eps_notify.until(|| bulk_eps.take() ).await;
 
             loop {
-                let len = ep_out.transfer(buf).await;
-                info!("bulk read {}: {:?}", len, &buf[..]);
-                ep_in.transfer(buf, len, true).await;
+                let len = ep_out.transfer(buf_out).await;
+                info!("bulk read {}: {:?}", len, &buf_out[..len]);
+                
+                let status = match viking.borrow().run(&buf_out[..len]).await {
+                    Ok(_) => 0,
+                    Err(_) => 1,
+                };
+
+                buf_in[1] = status;
+                ep_in.transfer(buf_in, 1, true).await;
                 info!("bulk write complete");
             }
         }
@@ -137,7 +212,7 @@ fn main() -> ! {
         48_000_000,
     );
     lilos::exec::run_tasks(
-        &mut [led_task, usb_task, bulk_task],
+        &mut [/*led_task,*/ usb_task, bulk_task],
         lilos::exec::ALL_TASKS,
     );
 }
@@ -145,7 +220,10 @@ fn main() -> ! {
 use usb::descriptors::{Config, Device, Endpoint, Interface, StringDecriptor};
 use usb::{In, UsbBuffer};
 
-use crate::usb::{Out, Usb};
+use crate::usb::{Out, Setup, Usb};
+use crate::viking::Resources;
+
+const INTF_VIKING: u8 = 0;
 
 const STRING_MFG: u8 = 1;
 const STRING_PRODUCT: u8 = 2;
@@ -176,7 +254,7 @@ static CONFIG_DESCRIPTOR: &[u8] = descriptors!{
         bMaxPower: 250,
 
         +Interface {
-            bInterfaceNumber: 0,
+            bInterfaceNumber: INTF_VIKING,
             bAlternateSetting: 0,
             bInterfaceClass: 0xff,
             bInterfaceSubClass: 0,
@@ -206,3 +284,22 @@ static CONFIG_DESCRIPTOR: &[u8] = descriptors!{
         }
     }
 };
+
+viking!(
+    viking_impl {
+        use {
+            crate::viking_sam0,
+            atsamd_hal::gpio::*,
+        };
+
+        pa10(1) {
+            gpio(1): viking_sam0::Gpio<PA10>,
+        }
+        pa11(2) {
+            gpio(1): viking_sam0::Gpio<PA11>,
+        }
+        pb30(3) {
+            gpio(1): viking_sam0::Gpio<PB30>,
+        }
+    }
+);
