@@ -215,6 +215,274 @@ impl Endpoint {
     }
 }
 
+pub struct BinaryObjectStore {}
+
+impl BinaryObjectStore {
+    pub const LEN: usize = 5;
+    pub const DESCRIPTOR_TYPE: u8 = usb::descriptor_type::BOS;
+
+    pub const fn bytes(self, children: &[&[u8]]) -> [u8; Self::LEN] {
+        let mut total_len = Self::LEN as u16;
+        let mut num_device_caps = 0;
+
+        let mut i = 0;
+        while i < children.len() {
+            total_len += children[i].len() as u16;
+            if children[i][1] == usb::descriptor_type::DEVICE_CAPABILITY {
+                num_device_caps += 1;
+            }
+            i += 1;
+        }
+
+        [
+            Self::LEN as u8,
+            Self::DESCRIPTOR_TYPE,
+            total_len.to_le_bytes()[0],
+            total_len.to_le_bytes()[1],
+            num_device_caps,
+        ]
+    }
+}
+
+const DEVICE_CAPABILITY_TYPE_PLATFORM: u8 = 0x05;
+
+pub struct PlatformCapabilityMicrosoftOs {
+    pub windows_version: u32,
+    pub vendor_code: u8,
+    pub alt_enum_code: u8,
+    pub msos_descriptor_len: usize,
+}
+
+impl PlatformCapabilityMicrosoftOs {
+    pub const LEN: usize = 28;
+    pub const DESCRIPTOR_TYPE: u8 = usb::descriptor_type::DEVICE_CAPABILITY;
+
+    pub const fn bytes(self, _children: &[&[u8]]) -> [u8; Self::LEN] {
+        [
+            Self::LEN as u8,
+            Self::DESCRIPTOR_TYPE,
+            DEVICE_CAPABILITY_TYPE_PLATFORM,
+            0, // reserved
+            
+            0xdf, // platform capability UUID: Microsoft OS 2.0
+            0x60,
+            0xdd,
+            0xd8,
+            0x89,
+            0x45,
+            0xc7,
+            0x4c,
+            0x9c,
+            0xd2,
+            0x65,
+            0x9d,
+            0x9e,
+            0x64,
+            0x8a,
+            0x9f,
+
+            self.windows_version.to_le_bytes()[0],
+            self.windows_version.to_le_bytes()[1],
+            self.windows_version.to_le_bytes()[2],
+            self.windows_version.to_le_bytes()[3],
+            
+            (self.msos_descriptor_len as u16).to_le_bytes()[0],
+            (self.msos_descriptor_len as u16).to_le_bytes()[1],
+
+            self.vendor_code,
+            self.alt_enum_code,
+        ]
+    }
+}
+
+const MS_OS_20_SET_HEADER_DESCRIPTOR: u8 = 0x00;
+const MS_OS_20_SUBSET_HEADER_CONFIGURATION: u8 = 0x01;
+const MS_OS_20_SUBSET_HEADER_FUNCTION: u8 = 0x02;
+const MS_OS_20_FEATURE_COMPATBLE_ID: u8 = 0x03;
+const MS_OS_20_FEATURE_REG_PROPERTY: u8 = 0x04;
+const MS_OS_20_FEATURE_MIN_RESUME_TIME: u8 = 0x05;
+const MS_OS_20_FEATURE_MODEL_ID: u8 = 0x06;
+const MS_OS_20_FEATURE_CCGP_DEVICE: u8 = 0x07;
+const MS_OS_20_FEATURE_VENDOR_REVISION: u8 = 0x08;
+
+pub struct MicrosoftOs {
+    pub windows_version: u32,
+}
+
+impl MicrosoftOs {
+    pub const LEN: usize = 10;
+    pub const DESCRIPTOR_TYPE: u8 = MS_OS_20_SET_HEADER_DESCRIPTOR;
+
+    pub const fn bytes(self, children: &[&[u8]]) -> [u8; Self::LEN] {
+        let mut total_len = Self::LEN as u16;
+
+        let mut i = 0;
+        while i < children.len() {
+            total_len += children[i].len() as u16;
+            i += 1;
+        }
+
+        [
+            Self::LEN as u8,
+            0,
+            Self::DESCRIPTOR_TYPE,
+            0,
+            
+            self.windows_version.to_le_bytes()[0],
+            self.windows_version.to_le_bytes()[1],
+            self.windows_version.to_le_bytes()[2],
+            self.windows_version.to_le_bytes()[3],
+
+            total_len.to_le_bytes()[0],
+            total_len.to_le_bytes()[1],
+        ]
+    }
+}
+
+pub struct MicrosoftOsConfiguration {
+    /// Despite the name, it doesn't correspond directly to the configuration descriptor and is 0-indexed
+    pub configuration_value: u8,
+}
+
+impl MicrosoftOsConfiguration {
+    pub const LEN: usize = 8;
+    pub const DESCRIPTOR_TYPE: u8 = MS_OS_20_SUBSET_HEADER_CONFIGURATION ;
+
+    pub const fn bytes(self, children: &[&[u8]]) -> [u8; Self::LEN] {
+        let mut total_len = Self::LEN as u16;
+
+        let mut i = 0;
+        while i < children.len() {
+            total_len += children[i].len() as u16;
+            i += 1;
+        }
+
+        [
+            Self::LEN as u8,
+            0,
+            Self::DESCRIPTOR_TYPE,
+            0,
+            
+            self.configuration_value,
+            0, // reserved
+
+            total_len.to_le_bytes()[0],
+            total_len.to_le_bytes()[1],
+        ]
+    }
+}
+
+pub struct MicrosoftOsFunction {
+    pub first_interface: u8,
+}
+
+impl MicrosoftOsFunction {
+    pub const LEN: usize = 8;
+    pub const DESCRIPTOR_TYPE: u8 = MS_OS_20_SUBSET_HEADER_FUNCTION;
+
+    pub const fn bytes(self, children: &[&[u8]]) -> [u8; Self::LEN] {
+        let mut total_len = Self::LEN as u16;
+
+        let mut i = 0;
+        while i < children.len() {
+            total_len += children[i].len() as u16;
+            i += 1;
+        }
+
+        [
+            Self::LEN as u8,
+            0,
+            Self::DESCRIPTOR_TYPE,
+            0,
+            
+            self.first_interface,
+            0, // reserved
+
+            total_len.to_le_bytes()[0],
+            total_len.to_le_bytes()[1],
+        ]
+    }
+}
+
+pub struct MicrosoftOsCompatibleID {
+    pub compatible_id: &'static str,
+    pub sub_compatible_id: &'static str,
+}
+
+impl MicrosoftOsCompatibleID {
+    pub const LEN: usize = 20;
+    pub const DESCRIPTOR_TYPE: u8 = MS_OS_20_FEATURE_COMPATBLE_ID;
+
+    pub const fn bytes(self, children: &[&[u8]]) -> [u8; Self::LEN] {
+        let mut bytes = [
+            Self::LEN as u8,
+            0,
+            Self::DESCRIPTOR_TYPE,
+            0,
+            
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+        ];
+
+        let src = self.compatible_id.as_bytes();
+        assert!(src.len() < 8);
+        let mut i = 0;
+        while i < src.len() {
+            bytes[i + 4] = src[i];
+            i += 1;
+        }
+
+        let src = self.sub_compatible_id.as_bytes();
+        assert!(src.len() < 8);
+        let mut i = 0;
+        while i < src.len() {
+            bytes[i + 12] = src[i];
+            i += 1;
+        }
+
+        bytes
+    }
+}
+
+pub struct MicrosoftOsDeviceInterfaceGUID {
+    pub guid: &'static str,
+}
+
+impl MicrosoftOsDeviceInterfaceGUID {
+    const PROPERTY_NAME: &'static str = "DeviceInterfaceGUIDs";
+    const VALUE_LEN: usize = 38;
+    pub const LEN: usize = 10 + (Self::PROPERTY_NAME.len() + 1)*2 + (Self::VALUE_LEN + 1)*2 + 2;
+    pub const DESCRIPTOR_TYPE: u8 = MS_OS_20_FEATURE_REG_PROPERTY;
+
+    pub const fn bytes(self, children: &[&[u8]]) -> [u8; Self::LEN] {
+        let mut bytes = [0; Self::LEN];
+        bytes[0] = Self::LEN as u8;
+        bytes[2] = Self::DESCRIPTOR_TYPE;
+        bytes[4] = 7; // wPropertyDataType = REG_MULTI_SZ
+        bytes[6] = ((Self::PROPERTY_NAME.len() + 1) * 2) as u8;
+
+        let value_offset = 8 + (Self::PROPERTY_NAME.len() + 1) * 2;
+        bytes[value_offset] = ((Self::VALUE_LEN + 1) * 2 + 2) as u8;
+
+        let src = Self::PROPERTY_NAME.as_bytes();
+        let mut i = 0;
+        while i < src.len() {
+            bytes[8 + i*2] = src[i];
+            i += 1;
+        }
+        
+        assert!(self.guid.len() == Self::VALUE_LEN);
+        let src = self.guid.as_bytes();
+        let mut i = 0;
+        while i < src.len() {
+            bytes[value_offset + 2 + i * 2] = src[i];
+            i += 1;
+        }
+
+        bytes
+    }
+}
+
 pub struct StringDecriptor<const N: usize>([u8; N]);
 
 impl<const N: usize> StringDecriptor<N> {

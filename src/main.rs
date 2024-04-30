@@ -80,10 +80,11 @@ fn main() -> ! {
     }
     impl usb::Handler for Handler<'_> {
         fn get_descriptor(&self, kind: u8, index: u8) -> Option<&[u8]> {
-            use ::usb::descriptor_type::{CONFIGURATION, DEVICE};
+            use ::usb::descriptor_type::{CONFIGURATION, DEVICE, BOS};
             match (kind, index) {
                 (DEVICE, _) => Some(DEVICE_DESCRIPTOR),
                 (CONFIGURATION, 0) => Some(CONFIG_DESCRIPTOR),
+                (BOS, 0) => Some(BOS_DESCRIPTOR),
                 _ => None,
             }
         }
@@ -130,6 +131,10 @@ fn main() -> ! {
             use viking_protocol::request::{CONFIGURE_MODE, DESCRIBE_MODE, LIST_MODES, LIST_RESOURCES};
 
             match req {
+                Setup { ty: Vendor, recipient: Device, request: MSOS_VENDOR_CODE, index: 0x07, data: In(data), .. } => {
+                    data.respond(&MSOS_DESCRIPTOR).await;
+                }
+
                 Setup { ty: Vendor, recipient: Interface, index: I_VIKING, request: LIST_RESOURCES, data: In(data), .. } => {
                     data.respond(viking_impl::State::RESOURCE_NAMES.as_bytes()).await;
                 }
@@ -225,7 +230,7 @@ fn main() -> ! {
     );
 }
 
-use usb::descriptors::{Config, Device, Endpoint, Interface, StringDecriptor};
+use usb::descriptors::{Config, Device, Endpoint, Interface, StringDecriptor, BinaryObjectStore, PlatformCapabilityMicrosoftOs, MicrosoftOs, MicrosoftOsConfiguration, MicrosoftOsFunction, MicrosoftOsCompatibleID, MicrosoftOsDeviceInterfaceGUID};
 use usb::{In, UsbBuffer};
 
 use crate::usb::{Out, Setup, Usb};
@@ -239,8 +244,8 @@ const STRING_SERIAL: u8 = 3;
 
 static DEVICE_DESCRIPTOR: &[u8] = descriptors! {
     Device {
-        bcdUSB: 0x0200,
-        bDeviceClass: 0xFF,
+        bcdUSB: 0x0201,
+        bDeviceClass: ::usb::class::VENDOR_SPECIFIC,
         bDeviceSubClass: 0x00,
         bDeviceProtocol: 0x00,
         bMaxPacketSize0: 64,
@@ -289,6 +294,30 @@ static CONFIG_DESCRIPTOR: &[u8] = descriptors!{
                 wMaxPacketSize: 64,
                 bInterval: 0,
             }
+        }
+    }
+};
+
+const MSOS_DESCRIPTOR: &[u8] = descriptors!{
+    MicrosoftOs {
+        windows_version: 0x06030000,
+
+        +MicrosoftOsCompatibleID {
+            compatible_id: "WINUSB",
+            sub_compatible_id: "",
+        }
+    }
+};
+
+const MSOS_VENDOR_CODE: u8 = 0xf0;
+
+static BOS_DESCRIPTOR: &[u8] = descriptors!{
+    BinaryObjectStore {
+        +PlatformCapabilityMicrosoftOs {
+            windows_version: 0x06030000,
+            vendor_code: MSOS_VENDOR_CODE,
+            alt_enum_code: 0,
+            msos_descriptor_len: MSOS_DESCRIPTOR.len(),
         }
     }
 };
