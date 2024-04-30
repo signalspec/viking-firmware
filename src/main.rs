@@ -112,6 +112,14 @@ fn main() -> ! {
             }
         }
 
+        async fn set_interface(&self, intf: u8, alt: u8, usb: &Usb) -> Result<(), ()> {
+            if intf == 0 && alt == 0 {
+                Ok(())
+            } else {
+                Err(())
+            }
+        }
+
         async fn handle_control<'a>(&self, req: Setup<'a>, usb: &Usb) {
             use usb::ControlType::*;
             use usb::Recipient::*;

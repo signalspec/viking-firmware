@@ -251,6 +251,10 @@ pub trait Handler {
         if cfg == 1 { Ok(()) } else { Err(()) }
     }
 
+    async fn set_interface(&self, intf: u8, alt: u8, _usb: &Usb) -> Result<(), ()> {
+        Err(())
+    }
+
     async fn handle_control<'a>(&self, req: Setup<'a>, usb: &Usb) {
         req.reject();
     }
@@ -433,7 +437,7 @@ impl Usb {
         use ControlType::*;
         use Recipient::*;
         use ControlData::*;
-        use usb::standard_request::{GET_DESCRIPTOR, SET_ADDRESS, SET_CONFIGURATION, GET_STATUS};
+        use usb::standard_request::{GET_DESCRIPTOR, SET_ADDRESS, SET_CONFIGURATION, SET_INTERFACE, GET_STATUS};
         use usb::descriptor_type;
         debug!("control request: {:?} {:?} {:02x} {:04x} {:04x} {:?}", req.ty, req.recipient, req.request, req.value, req.index, &req.data);
         match req {
@@ -468,6 +472,13 @@ impl Usb {
             Setup { ty: Standard, recipient: Device, request: SET_CONFIGURATION, value, data: Out(data), .. } => {
                 debug!("set configuration {}", value);
                 match h.set_configuration(value as u8, self).await {
+                    Ok(_) => data.accept().await,
+                    Err(_) => data.reject(),
+                }
+            }
+            Setup { ty: Standard, recipient: Interface, request: SET_INTERFACE, index, value, data: Out(data), .. } => {
+                debug!("set interface {} {}", index, value);
+                match h.set_interface(index as u8, value as u8, self).await {
                     Ok(_) => data.accept().await,
                     Err(_) => data.reject(),
                 }
