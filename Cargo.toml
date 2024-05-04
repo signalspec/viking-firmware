@@ -11,6 +11,7 @@ chip = "ATSAMD21J18"
 [dependencies.lilos]
 git = "https://github.com/kevinmehall/lilos.git"
 rev = "81c2fea2c9cdbcd05aa4de0eaddfdb65e179b3af"
+default_features = false
 
 [dependencies.cortex-m-rt]
 version = "0.7"
@@ -35,6 +36,7 @@ defmt-rtt = "0.4.0"
 futures-util = { version = "0.3.30", default-features = false, features = ["async-await", "async-await-macro"] }
 panic-probe = { version = "0.3" }
 pin-project-lite = "0.2.14"
+scopeguard = { version = "1.2.0", default_features = false }
 viking-protocol = { path = "../viking/viking-protocol" }
 
 [profile.dev]

@@ -14,7 +14,6 @@ use core::task::Poll;
 
 use hal::gpio::{Alternate, Pin, C};
 use lilos::exec::Notify;
-use lilos::time::{sleep_for, Millis};
 use panic_probe as _;
 use defmt_rtt as _;
 
@@ -33,6 +32,7 @@ use defmt::{error, info};
 mod usb;
 mod viking;
 mod viking_sam0;
+mod delay;
 
 static mut BULK_OUT_BUF: UsbBuffer<128> = UsbBuffer::new();
 static mut BULK_IN_BUF: UsbBuffer<128> = UsbBuffer::new();
@@ -50,6 +50,7 @@ fn main() -> ! {
     let pins = gpio::Pins::new(peripherals.PORT);
 
     info!("init");
+    let mut delay = delay::Delay::<48_000_000>::new(core.SYST);
 
     let gclk0 = clocks.gclk0();
 
@@ -198,7 +199,7 @@ fn main() -> ! {
 
                 let mut response = Writer::new(&mut buf_in[..], 1);
                 
-                let status = match viking.borrow().run(&buf_out[..len], &mut response).await {
+                let status = match viking.borrow().run(&buf_out[..len], &mut response, &mut delay).await {
                     Ok(_) => 0,
                     Err(_) => 1,
                 };
@@ -211,10 +212,6 @@ fn main() -> ! {
         }
     });
 
-    lilos::time::initialize_sys_tick(
-        &mut core.SYST,
-        48_000_000,
-    );
     lilos::exec::run_tasks(
         &mut [/*led_task,*/ usb_task, bulk_task],
         lilos::exec::ALL_TASKS,

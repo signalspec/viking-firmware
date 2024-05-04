@@ -1,6 +1,9 @@
 use core::mem;
 
+use defmt::{error, info};
 use viking_protocol::AsBytes;
+
+use crate::delay::AsyncDelayUs;
 
 pub struct Writer<'a> {
     offset: usize,
@@ -38,6 +41,13 @@ pub trait ResourceMode: Sized {
     fn poll_event(&self, resource: u8, buf: &mut Writer<'_>) {}
 }
 
+
+pub fn take_first<'a>(buf: &mut &'a [u8]) -> Option<u8> {
+    let (first, rem) = buf.split_first()?;
+    *buf = rem;
+    Some(*first)
+}
+
 pub trait Resources: Sized {
     const RESOURCE_NAMES: &'static str;
     fn mode_names(resource: u8) -> Option<&'static str>;
@@ -48,16 +58,33 @@ pub trait Resources: Sized {
     async fn command(&self, resource: u8, command: u8, buf: &mut &[u8], response: &mut Writer) -> Result<(), ()> ;
     fn poll_all(&self, buf: &mut Writer<'_>);
 
-    async fn run(&self, request: &[u8], response: &mut Writer<'_>) -> Result<(), ()> {
+    async fn run<D: AsyncDelayUs>(&self, request: &[u8], response: &mut Writer<'_>, delay: &mut D) -> Result<(), ()> {
         let mut request = request;
 
-        while let Some((byte, mut remaining)) = request.split_first() {
-            let resource = byte & ((1 << 6) - 1);
-            let command = byte >> 6;
-
-            self.command(resource, command, &mut remaining, response).await?;
-            
-            request = remaining;
+        while let Some(byte) = take_first(&mut request) {
+            use viking_protocol::protocol::cmd::DELAY;
+            match byte {
+                DELAY => {
+                    let mut us: u32 = 0;
+                    loop {
+                        let mut b = take_first(&mut request).ok_or(())?;
+                        us = (us << 7) | (b & ((1<<7) - 1)) as u32;
+                        if us > D::MAX {
+                            error!("Delay too long");
+                            return Err(());
+                        }
+                        if b & (1<<7) == 0 {
+                            break;
+                        }
+                    }
+                    delay.delay_us(us).await;
+                }
+                byte => {
+                    let resource = byte & ((1 << 6) - 1);
+                    let command = byte >> 6;
+                    self.command(resource, command, &mut request, response).await?;
+                }
+            }
         }
 
         Ok(())
