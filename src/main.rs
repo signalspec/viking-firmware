@@ -61,8 +61,6 @@ fn main() -> ! {
         w.usb_().set_bit()
     });
 
-    //let mut led = pins.pb30.into_push_pull_output();
-
     let usb_clock = &clocks.usb(&gclk0).unwrap();
 
     let mut usb = usb::Usb::new(&usb_clock, pins.pa24, pins.pa25, peripherals.USB);
@@ -188,16 +186,6 @@ fn main() -> ! {
         viking: &viking
     }));
 
-    /*let led_task = pin!(async {
-        loop {
-            led.set_high().unwrap();
-            sleep_for(Millis(1000)).await;
-            led.set_low().unwrap();
-            sleep_for(Millis(1000)).await;
-            info!("blink");
-        }
-    });*/
-
     let bulk_task = pin!(async {
         loop {
             let buf_out = unsafe { &mut *addr_of_mut!(BULK_OUT_BUF) };
@@ -207,14 +195,17 @@ fn main() -> ! {
             loop {
                 let len = ep_out.transfer(buf_out).await;
                 info!("bulk read {}: {:?}", len, &buf_out[..len]);
+
+                let mut response = Writer::new(&mut buf_in[..], 1);
                 
-                let status = match viking.borrow().run(&buf_out[..len]).await {
+                let status = match viking.borrow().run(&buf_out[..len], &mut response).await {
                     Ok(_) => 0,
                     Err(_) => 1,
                 };
-
-                buf_in[1] = status;
-                ep_in.transfer(buf_in, 1, true).await;
+                
+                let response_len = response.offset();
+                buf_in[0] = status;
+                ep_in.transfer(buf_in, response_len, true).await;
                 info!("bulk write complete");
             }
         }
@@ -234,7 +225,7 @@ use usb::descriptors::{Config, Device, Endpoint, Interface, StringDecriptor, Bin
 use usb::{In, UsbBuffer};
 
 use crate::usb::{Out, Setup, Usb};
-use crate::viking::Resources;
+use crate::viking::{Resources, Writer};
 
 const INTF_VIKING: u8 = 0;
 

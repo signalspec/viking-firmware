@@ -1,4 +1,29 @@
+use core::mem;
+
 use viking_protocol::AsBytes;
+
+pub struct Writer<'a> {
+    offset: usize,
+    buf: &'a mut [u8],
+}
+
+impl<'a> Writer<'a> {
+    pub fn new(buf: &'a mut [u8], offset: usize) -> Writer {
+        Writer { buf, offset }
+    }
+
+    pub fn offset(&self) -> usize {
+        self.offset
+    }
+
+    pub fn put(&mut self, b: u8) -> Result<(), ()> {
+        let next = self.buf.get_mut(self.offset).ok_or(())?;
+        *next = b;
+        self.offset += 1;
+        Ok(())
+    }
+}
+
 pub trait ResourceMode: Sized {
     fn describe() -> &'static [u8];
 
@@ -6,11 +31,11 @@ pub trait ResourceMode: Sized {
 
     fn deinit(self);
 
-    async fn command(&self, cmd: u8, buf: &mut &[u8]) -> Result<(), ()>;
-
-    fn poll_event(&self, resource: u8, buf: &mut [u8]) -> usize {
-        0
+    async fn command(&self, cmd: u8, buf: &mut &[u8], res: &mut Writer<'_>) -> Result<(), ()> {
+        Err(())
     }
+
+    fn poll_event(&self, resource: u8, buf: &mut Writer<'_>) {}
 }
 
 pub trait Resources: Sized {
@@ -20,17 +45,17 @@ pub trait Resources: Sized {
 
     fn new() -> Self;
     async fn configure(&mut self, resource: u8, mode: u8, config: &[u8]) -> Result<(), ()> ;
-    async fn command(&self, resource: u8, command: u8, buf: &mut &[u8]) -> Result<(), ()> ;
-    fn poll_all(&self, buf: &mut [u8]) -> usize;
+    async fn command(&self, resource: u8, command: u8, buf: &mut &[u8], response: &mut Writer) -> Result<(), ()> ;
+    fn poll_all(&self, buf: &mut Writer<'_>);
 
-    async fn run(&self, request: &[u8]) -> Result<(), ()> {
+    async fn run(&self, request: &[u8], response: &mut Writer<'_>) -> Result<(), ()> {
         let mut request = request;
 
         while let Some((byte, mut remaining)) = request.split_first() {
             let resource = byte & ((1 << 6) - 1);
             let command = byte >> 6;
 
-            self.command(resource, command, &mut remaining).await?;
+            self.command(resource, command, &mut remaining, response).await?;
             
             request = remaining;
         }
@@ -89,19 +114,19 @@ macro_rules! viking{
                         }
                     }
 
-                    pub async fn command(&self, cmd: u8, buf: &mut &[u8]) -> Result<(), ()> {
+                    pub async fn command(&self, cmd: u8, buf: &mut &[u8], response: &mut $crate::viking::Writer<'_>) -> Result<(), ()> {
                         use $crate::viking::ResourceMode;
                         match self {
-                            $(Self::$mode_name(s) => s.command(cmd, buf).await,)*
+                            $(Self::$mode_name(s) => s.command(cmd, buf, response).await,)*
                             _ => Err(())
                         }
                     }
 
-                    pub fn poll_event(&self, resource: u8, buf: &mut [u8]) -> usize {
+                    pub fn poll_event(&self, resource: u8, buf: &mut $crate::viking::Writer<'_>) {
                         use $crate::viking::ResourceMode;
                         match self {
                             $(Self::$mode_name(s) => s.poll_event(resource, buf),)*
-                            _ => 0
+                            _ => {}
                         }
                     }
                 }
@@ -158,22 +183,22 @@ macro_rules! viking{
                     }
                 }
 
-                async fn command(&self, resource: u8, command: u8, buf: &mut &[u8]) -> Result<(), ()> {
+                async fn command(&self, resource: u8, command: u8, buf: &mut &[u8], response: &mut $crate::viking::Writer<'_>) -> Result<(), ()> {
                     match resource {
                         $($resource_id => self.$resource_name
                             .as_ref().ok_or(())?
-                            .command(command, buf).await,
+                            .command(command, buf, response).await,
                         )*
                         _ => Err(())
                     }
                 }
 
-                fn poll_all(&self, mut buf: &mut [u8]) -> usize {
-                    let mut n = 0;
+                fn poll_all(&self, buf: &mut $crate::viking::Writer) {
                     $(
-                        n += if let Some(r) = self.$resource_name.as_ref() { r.poll_event($resource_id, &mut buf[n..]) } else { 0 };
+                        if let Some(r) = self.$resource_name.as_ref() {
+                            r.poll_event($resource_id, buf)
+                        }
                     )*
-                    n
                 }
             }
         }

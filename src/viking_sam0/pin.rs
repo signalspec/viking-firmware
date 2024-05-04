@@ -74,7 +74,7 @@ impl<P: PinId> IoPin<P> {
         1 << P::DYN.num
     }
 
-    pub fn enable_sampling(&self) {
+    pub fn enable_sampling() {
         unsafe {
             Self::group().ctrl.write(|w| w.bits(0xffffffff))
         }

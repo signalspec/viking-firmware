@@ -4,7 +4,7 @@ use super::pin::{PinId, IoPin};
 use defmt::info;
 use viking_protocol::protocol::gpio::pin::DescribeMode;
 
-use crate::viking::ResourceMode;
+use crate::viking::{ResourceMode, Writer};
 use viking_protocol::AsBytes;
 
 pub struct Gpio<P>(PhantomData<P>);
@@ -34,6 +34,8 @@ impl<P: PinId> ResourceMode for Gpio<P> {
 
     fn init(config: &[u8]) -> Result<Self, ()> {
         info!("gpio init {:?} {:?}", P::DYN.group as u8, P::DYN.num);
+        IoPin::<P>::pincfg().write(|w| w.inen().set_bit());
+        IoPin::<P>::enable_sampling();
         Ok(Gpio(PhantomData))
     }
 
@@ -42,7 +44,7 @@ impl<P: PinId> ResourceMode for Gpio<P> {
         IoPin::<P>::dirclr();
     }
 
-    async fn command(&self, command: u8, buf: &mut &[u8]) -> Result<(), ()> {
+    async fn command(&self, command: u8, buf: &mut &[u8], response: &mut Writer<'_>) -> Result<(), ()> {
         use viking_protocol::protocol::gpio::pin::cmd;
         
         match command {
@@ -51,7 +53,9 @@ impl<P: PinId> ResourceMode for Gpio<P> {
                 Ok(())
             }
             cmd::READ => {
-                Err(())
+                let byte: u8 = if IoPin::<P>::read() { 0x01 } else { 0x00 };
+                response.put(byte)?;
+                Ok(())
             }
             cmd::LOW => {
                 IoPin::<P>::outclr();
