@@ -29,6 +29,27 @@ pub(super) struct GROUP {
     _padding2: [u8; 32],
 }
 
+
+pub trait AlternateFunc {
+    const DYN: Alternate;
+}
+macro_rules! alternate {
+    ($($letter:ident),+) => {
+        #[repr(u8)]
+        pub enum Alternate { $($letter),+ }
+        pub mod alternate {
+            use super::{Alternate, AlternateFunc};
+            $(
+                pub enum $letter {}
+                impl AlternateFunc for $letter {
+                    const DYN: Alternate = Alternate::$letter;
+                }
+            )+
+        }
+    };
+}
+alternate!(A, B, C, D, E, F, G, H);
+
 pub struct IoPin<P: PinId>(PhantomData<P>);
 
 impl<P: PinId> IoPin<P> {
@@ -96,14 +117,12 @@ impl<P: PinId> IoPin<P> {
         &Self::group().pincfg[Self::id().num as usize]
     }
 
-    pub fn alternate(p: DynAlternate) {
-        let pmux = (p as u8) + 1;
-
+    pub fn alternate(pmux: Alternate) {
         Self::group().wrconfig.write(|w| {
             w.hwsel().bit(Self::hwsel());
             w.wrpincfg().set_bit();
             w.wrpmux().set_bit();
-            w.pmux().variant(pmux);
+            w.pmux().variant(pmux as u8);
             w.pmuxen().bit(true);
             w.pinmask().variant(Self::mask_16())
         });

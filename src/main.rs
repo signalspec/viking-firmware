@@ -12,6 +12,7 @@ use core::pin::pin;
 use core::ptr::addr_of_mut;
 use core::task::Poll;
 
+use cortex_m::peripheral;
 use hal::gpio::{Alternate, Pin, C};
 use lilos::exec::Notify;
 use panic_probe as _;
@@ -64,11 +65,14 @@ fn main() -> ! {
         w.usb_().set_bit()
     });
 
+    peripherals.EIC.ctrl.write(|w| w.enable().set_bit());
+
     let _sercom0_clock = &clocks.sercom0_core(&gclk0).unwrap();
     let _sercom1_clock = &clocks.sercom1_core(&gclk0).unwrap();
 
     unsafe {
         cortex_m::peripheral::NVIC::unmask(Interrupt::SERCOM0);
+        cortex_m::peripheral::NVIC::unmask(Interrupt::EIC);
     }
 
     let usb_clock = &clocks.usb(&gclk0).unwrap();
@@ -324,6 +328,7 @@ viking::viking!(
             crate::viking_sam0,
             atsamd_hal::gpio::*,
             atsamd_hal::sercom::*,
+            crate::viking_sam0::alternate::C,
         };
 
         pa08(1) {
@@ -342,6 +347,7 @@ viking::viking!(
         }
         pa11(4) {
             gpio(1): viking_sam0::Gpio<PA11>,
+            level_interrupt(2): viking_sam0::LevelInterrupt<PA11, 11>,
         }
         pb30(5) {
             gpio(1): viking_sam0::Gpio<PB30>,

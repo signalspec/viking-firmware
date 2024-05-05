@@ -1,8 +1,9 @@
 mod pin;
+pub use pin::{alternate, Alternate, AlternateFunc};
 mod sercom;
 
 mod gpio;
-pub use gpio::Gpio;
+pub use gpio::{Gpio, LevelInterrupt};
 
 mod i2c;
 pub use i2c::{SercomI2C, SercomSCLPin, SercomSDAPin};

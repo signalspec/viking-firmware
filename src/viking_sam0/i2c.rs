@@ -1,13 +1,13 @@
 use core::{cell::Cell, marker::PhantomData};
 
-use atsamd_hal::{ehal::spi::Mode, gpio::{AlternateConfig, PinId, B}, pac::{interrupt, sercom0::{self, RegisterBlock, I2CM}, Interrupt, SERCOM0, SERCOM1}, sercom::Sercom};
+use atsamd_hal::{ehal::spi::Mode, gpio::{PinId, B}, pac::{interrupt, sercom0::{self, RegisterBlock, I2CM}, Interrupt, SERCOM0, SERCOM1}, sercom::Sercom};
 use lilos::exec::Notify;
 use defmt::{debug, info, Format};
 
 use viking_protocol::protocol::i2c;
 use viking_protocol::AsBytes;
 
-use crate::{viking::{const_bytes, take_first, take_len, ResourceMode, Writer}, viking_sam0::{pin::IoPin, sercom::DynSercom}};
+use crate::{viking::{const_bytes, take_first, take_len, ResourceMode, Writer}, viking_sam0::{pin::IoPin, sercom::DynSercom, AlternateFunc}};
 
 #[derive(Clone, Copy, Debug, PartialEq, Format)]
 enum State {
@@ -86,7 +86,7 @@ impl<S: Sercom> ResourceMode for SercomI2C<S> {
 
 pub struct SercomSCLPin<P, S, M>(PhantomData<(P, S, M)>);
 
-impl<P: PinId, S: Sercom, M: AlternateConfig> ResourceMode for SercomSCLPin<P, S, M> {
+impl<P: PinId, S: Sercom, M: AlternateFunc> ResourceMode for SercomSCLPin<P, S, M> {
     fn describe() -> &'static [u8] {
         const_bytes!(
             i2c::scl::DescribeMode {
@@ -108,7 +108,7 @@ impl<P: PinId, S: Sercom, M: AlternateConfig> ResourceMode for SercomSCLPin<P, S
 
 pub struct SercomSDAPin<P, S, M>(PhantomData<(P, S, M)>);
 
-impl<P: PinId, S, M: AlternateConfig> ResourceMode for SercomSDAPin<P, S, M> {
+impl<P: PinId, S, M: AlternateFunc> ResourceMode for SercomSDAPin<P, S, M> {
     fn describe() -> &'static [u8] {
         const_bytes!(
             i2c::sda::DescribeMode {

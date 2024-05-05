@@ -1,13 +1,13 @@
 use core::{cell::Cell, marker::PhantomData, mem::take};
 
-use atsamd_hal::{ehal::spi::Mode, gpio::{AlternateConfig, PinId, B}, pac::{interrupt, sercom0::{self, RegisterBlock, I2CM}, Interrupt, SERCOM0, SERCOM1}, sercom::Sercom};
+use atsamd_hal::{ehal::spi::Mode, gpio::{PinId, B}, pac::{interrupt, sercom0::{self, RegisterBlock, I2CM}, Interrupt, SERCOM0, SERCOM1}, sercom::Sercom};
 use lilos::exec::Notify;
 use defmt::{debug, info, Format};
 
 use viking_protocol::{protocol::spi, U32};
 use viking_protocol::AsBytes;
 
-use crate::{viking::{const_bytes, take_first, take_len, ResourceMode, Writer}, viking_sam0::{pin::IoPin, sercom::DynSercom}};
+use crate::{viking::{const_bytes, take_first, take_len, ResourceMode, Writer}, viking_sam0::{pin::IoPin, sercom::DynSercom, AlternateFunc}};
 
 pub struct SercomSPI<S, const DOPO: u8, const DIPO: u8> {
     _p: PhantomData<S>,
@@ -55,7 +55,7 @@ impl<S: Sercom, const DOPO: u8, const DIPO: u8> ResourceMode for SercomSPI<S, DO
 
 pub struct SercomSCKPin<P, S, M>(PhantomData<(P, S, M)>);
 
-impl<P: PinId, S: Sercom, M: AlternateConfig> ResourceMode for SercomSCKPin<P, S, M> {
+impl<P: PinId, S: Sercom, M: AlternateFunc> ResourceMode for SercomSCKPin<P, S, M> {
     fn describe() -> &'static [u8] {
         const_bytes!(
             spi::sck_pin::DescribeMode {
@@ -77,7 +77,7 @@ impl<P: PinId, S: Sercom, M: AlternateConfig> ResourceMode for SercomSCKPin<P, S
 
 pub struct SercomSOPin<P, S, M>(PhantomData<(P, S, M)>);
 
-impl<P: PinId, S, M: AlternateConfig> ResourceMode for SercomSOPin<P, S, M> {
+impl<P: PinId, S, M: AlternateFunc> ResourceMode for SercomSOPin<P, S, M> {
     fn describe() -> &'static [u8] {
         const_bytes!(
             spi::so_pin::DescribeMode {
@@ -99,7 +99,7 @@ impl<P: PinId, S, M: AlternateConfig> ResourceMode for SercomSOPin<P, S, M> {
 
 pub struct SercomSIPin<P, S, M>(PhantomData<(P, S, M)>);
 
-impl<P: PinId, S, M: AlternateConfig> ResourceMode for SercomSIPin<P, S, M> {
+impl<P: PinId, S, M: AlternateFunc> ResourceMode for SercomSIPin<P, S, M> {
     fn describe() -> &'static [u8] {
         const_bytes!(
             spi::si_pin::DescribeMode {
