@@ -7,22 +7,7 @@ use defmt::{debug, info, Format};
 use viking_protocol::protocol::i2c;
 use viking_protocol::AsBytes;
 
-use crate::{viking::{const_bytes, take_first, take_len, ResourceMode, Writer}, viking_sam0::pin::IoPin};
-
-const NEW_NOTIFY: Notify = Notify::new();
-static IRQ: [Notify; 6] = [NEW_NOTIFY; 6];
-
-struct DynSercom(usize);
-
-impl DynSercom {
-    fn regs(&self) -> &RegisterBlock {
-        unsafe { &*(SERCOM0::PTR.byte_offset((SERCOM1::PTR as usize - SERCOM0::PTR as usize) as isize * self.0 as isize) ) }
-    }
-
-    fn notify(&self) -> &Notify {
-        &IRQ[self.0]
-    }
-}
+use crate::{viking::{const_bytes, take_first, take_len, ResourceMode, Writer}, viking_sam0::{pin::IoPin, sercom::DynSercom}};
 
 #[derive(Clone, Copy, Debug, PartialEq, Format)]
 enum State {
@@ -277,23 +262,4 @@ async fn stop(sercom: DynSercom, state: &Cell<State>) {
 
     state.set(State::Idle)
 }
-
-
-#[interrupt]
-fn SERCOM0() {
-    let sercom = unsafe { SERCOM0::steal() };
-    IRQ[0].notify();
-    let flag = sercom.i2cm().intflag.read();
-    sercom.i2cm().intenclr.write(|w| {
-        if flag.mb().bit_is_set() {
-            w.mb().set_bit();
-        }
-        if flag.sb().bit_is_set() {
-            w.sb().set_bit();
-        }
-        w.error().set_bit();
-        w
-    });
-}
-
 

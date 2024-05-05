@@ -329,13 +329,16 @@ viking::viking!(
         pa08(1) {
             gpio(1): viking_sam0::Gpio<PA08>,
             sercom0_i2c_sda(2): viking_sam0::SercomSCLPin<PA08, Sercom0, C>,
+            sercom0_spi_so(3): viking_sam0::SercomSOPin<PA08, Sercom0, C>,
         }
         pa09(2) {
             gpio(1): viking_sam0::Gpio<PA09>,
             sercom0_i2c_scl(2): viking_sam0::SercomSDAPin<PA09, Sercom0, C>,
+            sercom0_spi_sck(3): viking_sam0::SercomSCKPin<PA09, Sercom0, C>,
         }
         pa10(3) {
             gpio(1): viking_sam0::Gpio<PA10>,
+            sercom0_spi_si(2): viking_sam0::SercomSIPin<PA10, Sercom0, C>,
         }
         pa11(4) {
             gpio(1): viking_sam0::Gpio<PA11>,
@@ -345,6 +348,7 @@ viking::viking!(
         }
         sercom0(6) {
             i2c(1): viking_sam0::SercomI2C<Sercom0>,
+            spi(2): viking_sam0::SercomSPI<Sercom0, 0, 2>,
         }
     }
 );
