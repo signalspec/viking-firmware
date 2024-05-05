@@ -7,12 +7,15 @@ use core::cell::{Cell, RefCell, UnsafeCell};
 use core::convert::Infallible;
 use core::future::{Future, poll_fn};
 use core::marker::PhantomData;
+use core::mem;
 use core::ops::Not;
 use core::pin::pin;
 use core::ptr::addr_of_mut;
 use core::task::Poll;
 
 use cortex_m::peripheral;
+use futures_util::future::{Fuse, FusedFuture};
+use futures_util::FutureExt;
 use hal::gpio::{Alternate, Pin, C};
 use lilos::exec::Notify;
 use panic_probe as _;
@@ -38,6 +41,10 @@ mod delay;
 
 static mut BULK_OUT_BUF: UsbBuffer<128> = UsbBuffer::new();
 static mut BULK_IN_BUF: UsbBuffer<128> = UsbBuffer::new();
+static mut EVT_IN_BUF1: UsbBuffer<64> = UsbBuffer::new();
+static mut EVT_IN_BUF2: UsbBuffer<64> = UsbBuffer::new();
+
+static EVENT_CHANGE: Notify = Notify::new();
 
 #[entry]
 fn main() -> ! {
@@ -81,12 +88,14 @@ fn main() -> ! {
     usb.attach();
 
     let bulk_eps = Cell::new(None);
+    let evt_ep = Cell::new(None);
     let bulk_eps_notify = Notify::new();
 
     let viking = RefCell::new(viking_impl::State::new());
 
     struct Handler<'a> {
         bulk_eps: &'a Cell<Option<(usb::Endpoint<Out, 0x01>, usb::Endpoint<In, 0x82>)>>,
+        evt_ep: &'a Cell<Option<(usb::Endpoint<In, 0x83>)>>,
         bulk_eps_notify: &'a Notify,
         viking: &'a RefCell<viking_impl::State>,
     }
@@ -115,8 +124,10 @@ fn main() -> ! {
             if cfg == 1 {
                 let ep_out = usb.configure_ep_out::<0x01>();
                 let ep_in = usb.configure_ep_in::<0x82>();
+                let evt_in = usb.configure_ep_in::<0x83>();
 
                 self.bulk_eps.set(Some((ep_out, ep_in)));
+                self.evt_ep.set(Some(evt_in));
                 self.bulk_eps_notify.notify();
 
                 Ok(())
@@ -195,6 +206,7 @@ fn main() -> ! {
 
     let usb_task = pin!(usb.handle(Handler {
         bulk_eps: &bulk_eps,
+        evt_ep: &evt_ep,
         bulk_eps_notify: &bulk_eps_notify,
         viking: &viking
     }));
@@ -224,8 +236,38 @@ fn main() -> ! {
         }
     });
 
+    let evt_task = pin!(async {
+        loop {
+            let mut buf_fill = unsafe { addr_of_mut!(EVT_IN_BUF1) };
+            let mut buf_send = unsafe { addr_of_mut!(EVT_IN_BUF2) };
+            let evt_ep = bulk_eps_notify.until(|| evt_ep.take() ).await;
+
+            let mut transfer = pin!(Fuse::terminated());
+            let mut buf = Writer::new(unsafe { &mut (*buf_fill)[..] }, 0);
+
+            poll_fn(|cx| -> Poll<Infallible> {
+                EVENT_CHANGE.subscribe(cx.waker());
+                viking.borrow().poll_all(cx.waker(), &mut buf);
+
+                transfer.as_mut().poll(cx);
+                info!("Events: {:?} {} {:?}", buf_fill, buf.offset(), transfer.is_terminated());
+
+                if transfer.is_terminated() && buf.offset() > 0 {
+                    let len = buf.offset();
+                    buf = Writer::new(unsafe { &mut (*buf_send)[..] }, 0);
+                    info!("Sending events: {}", len);
+                    transfer.set(evt_ep.transfer(unsafe { &mut *buf_fill }, len, true).fuse());
+                    transfer.as_mut().poll(cx);
+                    mem::swap(&mut buf_fill, &mut buf_send);
+                }
+
+                Poll::Pending
+            }).await;
+        }
+    });
+
     lilos::exec::run_tasks(
-        &mut [/*led_task,*/ usb_task, bulk_task],
+        &mut [usb_task, bulk_task, evt_task],
         lilos::exec::ALL_TASKS,
     );
 }

@@ -616,7 +616,7 @@ impl<const EP: u8> Endpoint<In, EP> {
     }
 
     pub async fn transfer<const SIZE: usize>(&self, buf: &UsbBuffer<SIZE>, len: usize, zlp: bool) {
-        assert!(len < SIZE);
+        assert!(len <= SIZE);
         transfer_in(EP, self.ep(), self.ep_ram(), PacketSize::Size64, buf.0.as_ptr(), len, zlp).await
     }
 }

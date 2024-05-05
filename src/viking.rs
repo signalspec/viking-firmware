@@ -1,4 +1,4 @@
-use core::mem;
+use core::{mem, task::Waker};
 
 use defmt::{error, info};
 use viking_protocol::AsBytes;
@@ -38,7 +38,7 @@ pub trait ResourceMode: Sized {
         Err(())
     }
 
-    fn poll_event(&self, resource: u8, buf: &mut Writer<'_>) {}
+    fn poll_event(&self, waker: &Waker, resource: u8, buf: &mut Writer<'_>) {}
 }
 
 
@@ -63,7 +63,7 @@ pub trait Resources: Sized {
     fn new() -> Self;
     fn configure(&mut self, resource: u8, mode: u8, config: &[u8]) -> Result<(), ()> ;
     async fn command(&self, resource: u8, command: u8, buf: &mut &[u8], response: &mut Writer) -> Result<(), ()> ;
-    fn poll_all(&self, buf: &mut Writer<'_>);
+    fn poll_all(&self, waker: &Waker, buf: &mut Writer<'_>);
 
     async fn run<D: AsyncDelayUs>(&self, request: &[u8], response: &mut Writer<'_>, delay: &mut D) -> Result<(), ()> {
         let mut request = request;
@@ -209,11 +209,11 @@ macro_rules! viking{
                     }
                 }
 
-                fn poll_all(&self, buf: &mut $crate::viking::Writer) {
+                fn poll_all(&self, waker: &core::task::Waker, buf: &mut $crate::viking::Writer) {
                     use $crate::viking::ResourceMode;
                     $(
                         match &self.$resource_name {
-                            $(Some($resource_name::$mode_name(s)) => s.poll_event($resource_id, buf),)*
+                            $(Some($resource_name::$mode_name(s)) => s.poll_event(waker, $resource_id, buf),)*
                             _ => {}
                         }
                     )*

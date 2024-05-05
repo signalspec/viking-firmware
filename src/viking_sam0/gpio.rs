@@ -1,4 +1,4 @@
-use core::marker::PhantomData;
+use core::{cell::Cell, marker::PhantomData, task::Waker};
 
 use super::pin::{PinId, IoPin};
 use defmt::{debug, info};
@@ -7,7 +7,7 @@ use viking_protocol::protocol::gpio;
 use viking_protocol::AsBytes;
 use atsamd_hal::pac::{eic::config, interrupt, EIC};
 
-use crate::{viking::{const_bytes, ResourceMode, Writer}, viking_sam0::pin::Alternate};
+use crate::{viking::{const_bytes, ResourceMode, Writer}, viking_sam0::pin::Alternate, EVENT_CHANGE};
 
 pub struct Gpio<P>(PhantomData<P>);
 
@@ -61,7 +61,10 @@ impl<P: PinId> ResourceMode for Gpio<P> {
 }
 
 
-pub struct LevelInterrupt<P, const CH: u8>(PhantomData<P>);
+pub struct LevelInterrupt<P, const CH: u8>{
+    _p: PhantomData<P>,
+    event: Cell<Option<bool>>,
+}
 
 impl<P: PinId, const CH: u8> ResourceMode for LevelInterrupt<P, CH> {
     fn describe() -> &'static [u8] {
@@ -75,7 +78,7 @@ impl<P: PinId, const CH: u8> ResourceMode for LevelInterrupt<P, CH> {
     fn init(config: &[u8]) -> Result<Self, ()> {
         info!("level_interrupt init {:?} {:?}", P::DYN.group as u8, P::DYN.num);
         IoPin::<P>::alternate(Alternate::A);
-        Ok(LevelInterrupt(PhantomData))
+        Ok(LevelInterrupt { _p: PhantomData, event: Cell::new(None) })
     }
 
     fn deinit(self) {
@@ -86,21 +89,37 @@ impl<P: PinId, const CH: u8> ResourceMode for LevelInterrupt<P, CH> {
     async fn command(&self, command: u8, buf: &mut &[u8], response: &mut Writer<'_>) -> Result<(), ()> {
         use viking_protocol::protocol::gpio::level_interrupt::cmd;
         
-        let (sense, wait) = match command {
-            cmd::WAIT_LOW => (Sense::LOW, true),
-            cmd::WAIT_HIGH => (Sense::HIGH, true),
-            cmd::EVT_LOW => (Sense::LOW, false),
-            cmd::EVT_HIGH => (Sense::HIGH, false),
+        let (sense, event) = match command {
+            cmd::WAIT_LOW => (Sense::LOW, None),
+            cmd::WAIT_HIGH => (Sense::HIGH, None),
+            cmd::EVT_LOW => (Sense::LOW, Some(false)),
+            cmd::EVT_HIGH => (Sense::HIGH, Some(true)),
             _ => return Err(())
         };
-        
-        configure_interrupt(CH, sense);
 
-        if wait {
+        configure_interrupt(CH, sense);
+        self.event.set(event);
+
+        if event.is_none() {
             wait_interrupt(CH).await;
+        } else {
+            EVENT_CHANGE.notify();
         }
 
         Ok(())
+    }
+
+    fn poll_event(&self, waker: &Waker, resource: u8, buf: &mut Writer<'_>) {
+        if let Some(level) = self.event.get() {
+            let eic = unsafe { EIC::steal() };
+            if eic.intflag.read().bits() & (1<<CH) != 0 {
+                if buf.put(resource | ((level as u8) << 6)).is_ok() {
+                    self.event.set(None);
+                }
+            } else {
+                IRQ.subscribe(waker);
+            }
+        }
     }
 }
 
