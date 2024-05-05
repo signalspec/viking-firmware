@@ -1,10 +1,10 @@
 /// Largely copied from atsamd-hal under Apache-2.0 OR MIT.
 use core::marker::PhantomData;
 
-use atsamd_hal::{pac::{port::{
+use atsamd_hal::{gpio::{DynAlternate, DynGroup, DynPinId, Pin, PinMode}, pac::{port::{
     CTRL, DIR, DIRCLR, DIRSET, DIRTGL, IN, OUT, OUTCLR, OUTSET, OUTTGL, PINCFG0_ as PINCFG,
     PMUX0_ as PMUX, WRCONFIG,
-}, PORT, PORT_IOBUS}, gpio::{DynPinId, DynGroup, Pin, PinMode}};
+}, PORT, PORT_IOBUS}};
 
 pub use atsamd_hal::gpio::PinId;
 
@@ -74,6 +74,17 @@ impl<P: PinId> IoPin<P> {
         1 << P::DYN.num
     }
 
+    #[inline]
+    fn mask_16() -> u16 {
+        1 << (P::DYN.num & 0xF)
+    }
+
+    #[inline]
+    fn hwsel() -> bool {
+         P::DYN.num & 0x10 != 0
+    }
+
+
     pub fn enable_sampling() {
         unsafe {
             Self::group().ctrl.write(|w| w.bits(0xffffffff))
@@ -83,6 +94,30 @@ impl<P: PinId> IoPin<P> {
     #[inline]
     pub fn pincfg() -> &'static PINCFG {
         &Self::group().pincfg[Self::id().num as usize]
+    }
+
+    pub fn alternate(p: DynAlternate) {
+        let pmux = (p as u8) + 1;
+
+        Self::group().wrconfig.write(|w| {
+            w.hwsel().bit(Self::hwsel());
+            w.wrpincfg().set_bit();
+            w.wrpmux().set_bit();
+            w.pmux().variant(pmux);
+            w.pmuxen().bit(true);
+            w.pinmask().variant(Self::mask_16())
+        });
+    }
+
+    pub fn reset() {
+        Self::group().wrconfig.write(|w| {
+            w.hwsel().bit(Self::hwsel());
+            w.wrpincfg().set_bit();
+            w.wrpmux().set_bit();
+            w.pmux().variant(0);
+            w.pmuxen().bit(false);
+            w.pinmask().variant(Self::mask_16())
+        });
     }
 
     #[inline]    

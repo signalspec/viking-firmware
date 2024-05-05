@@ -4,24 +4,12 @@ use super::pin::{PinId, IoPin};
 use defmt::info;
 use viking_protocol::protocol::gpio::pin::DescribeMode;
 
-use crate::viking::{ResourceMode, Writer};
+use crate::viking::{ResourceMode, Writer, const_bytes};
 use viking_protocol::AsBytes;
 
 pub struct Gpio<P>(PhantomData<P>);
 
 use viking_protocol::protocol::gpio;
-
-macro_rules! const_bytes {
-    ($($n:ident)::+ { $($inner:tt)* }) => {
-        {
-            static S: $($n)::* = $($n)::* {
-                $($inner)*
-            };
-            S.as_bytes()
-        }
-    }
-}
-
 
 impl<P: PinId> ResourceMode for Gpio<P> {
     fn describe() -> &'static [u8] {

@@ -24,8 +24,9 @@ pub use cortex_m_rt::entry;
 pub use hal::pac;
 
 use hal::clock::GenericClockController;
-use hal::pac::{CorePeripherals, Peripherals};
+use hal::pac::{CorePeripherals, Interrupt, Peripherals};
 use hal::{gpio, prelude::*, serial_number };
+use hal::sercom::Sercom0;
 
 use defmt::{error, info};
 
@@ -55,12 +56,20 @@ fn main() -> ! {
     let gclk0 = clocks.gclk0();
 
     peripherals.PM.apbcmask.write(|w| {
+        w.sercom0_().set_bit();
         w.sercom1_().set_bit()
     });
 
     peripherals.PM.ahbmask.write(|w| {
         w.usb_().set_bit()
     });
+
+    let _sercom0_clock = &clocks.sercom0_core(&gclk0).unwrap();
+    let _sercom1_clock = &clocks.sercom1_core(&gclk0).unwrap();
+
+    unsafe {
+        cortex_m::peripheral::NVIC::unmask(Interrupt::SERCOM0);
+    }
 
     let usb_clock = &clocks.usb(&gclk0).unwrap();
 
@@ -310,21 +319,33 @@ static BOS_DESCRIPTOR: &[u8] = descriptors!{
     }
 };
 
-viking!(
+viking::viking!(
     viking_impl {
         use {
             crate::viking_sam0,
             atsamd_hal::gpio::*,
+            atsamd_hal::sercom::*,
         };
 
-        pa10(1) {
+        pa08(1) {
+            gpio(1): viking_sam0::Gpio<PA08>,
+            sercom0_i2c_sda(2): viking_sam0::SercomSCLPin<PA08, Sercom0, C>,
+        }
+        pa09(2) {
+            gpio(1): viking_sam0::Gpio<PA09>,
+            sercom0_i2c_scl(2): viking_sam0::SercomSDAPin<PA09, Sercom0, C>,
+        }
+        pa10(3) {
             gpio(1): viking_sam0::Gpio<PA10>,
         }
-        pa11(2) {
+        pa11(4) {
             gpio(1): viking_sam0::Gpio<PA11>,
         }
-        pb30(3) {
+        pb30(5) {
             gpio(1): viking_sam0::Gpio<PB30>,
+        }
+        sercom0(6) {
+            i2c(1): viking_sam0::SercomI2C<Sercom0>,
         }
     }
 );

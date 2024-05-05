@@ -48,6 +48,13 @@ pub fn take_first<'a>(buf: &mut &'a [u8]) -> Option<u8> {
     Some(*first)
 }
 
+pub fn take_len<'a>(buf: &mut &'a [u8]) -> Option<&'a [u8]> {
+    let len = take_first(buf)? as usize;
+    let s = buf.get(..len)?;
+    *buf = &buf[len..];
+    Some(s)
+}
+
 pub trait Resources: Sized {
     const RESOURCE_NAMES: &'static str;
     fn mode_names(resource: u8) -> Option<&'static str>;
@@ -91,7 +98,6 @@ pub trait Resources: Sized {
     }
 }
 
-#[macro_export]
 macro_rules! viking{
     (
         $mod_name:ident {
@@ -111,7 +117,7 @@ macro_rules! viking{
             $(
                 #[allow(non_camel_case_types)]
                 pub enum $resource_name {
-                    $($mode_name($mode_ty))*
+                    $($mode_name($mode_ty)),*
                 }
 
                 impl $resource_name {
@@ -231,3 +237,19 @@ macro_rules! viking{
         }
     }
 }
+
+pub(crate) use viking;
+
+
+macro_rules! const_bytes {
+    ($($n:ident)::+ { $($inner:tt)* }) => {
+        {
+            static S: $($n)::* = $($n)::* {
+                $($inner)*
+            };
+            S.as_bytes()
+        }
+    }
+}
+
+pub(crate) use const_bytes;
