@@ -172,15 +172,14 @@ fn main() -> ! {
                     info!("configure {} {}", resource, mode);
 
                     let Ok(mut resources) = self.viking.try_borrow_mut() else {
-                        error!("busy");
+                        info!("busy");
                         data.reject();
                         return;
                     };
 
-                    if resources.configure(resource, mode, &[]).await.is_ok() {
+                    if resources.configure(resource, mode, &[]).is_ok() {
                         data.accept().await;
                     } else {
-                        error!("configure failed");
                         data.reject();
                     }
                 }

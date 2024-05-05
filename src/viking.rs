@@ -61,7 +61,7 @@ pub trait Resources: Sized {
     fn describe(resource: u8, mode: u8) -> Option<&'static [u8]>;
 
     fn new() -> Self;
-    async fn configure(&mut self, resource: u8, mode: u8, config: &[u8]) -> Result<(), ()> ;
+    fn configure(&mut self, resource: u8, mode: u8, config: &[u8]) -> Result<(), ()> ;
     async fn command(&self, resource: u8, command: u8, buf: &mut &[u8], response: &mut Writer) -> Result<(), ()> ;
     fn poll_all(&self, buf: &mut Writer<'_>);
 
@@ -77,7 +77,7 @@ pub trait Resources: Sized {
                         let mut b = take_first(&mut request).ok_or(())?;
                         us = (us << 7) | (b & ((1<<7) - 1)) as u32;
                         if us > D::MAX {
-                            error!("Delay too long");
+                            info!("Delay too long");
                             return Err(());
                         }
                         if b & (1<<7) == 0 {
@@ -132,33 +132,10 @@ macro_rules! viking{
                         }
                     }
 
-                    pub fn init(mode: u8, config: &[u8]) -> Result<Self, ()> {
-                        Ok(match mode {
-                            $($mode_id => Self::$mode_name(<$mode_ty as $crate::viking::ResourceMode>::init(config)?),)*
-                            _ => return Err(())
-                        })
-                    }
-
                     pub fn deinit(self) {
                         use $crate::viking::ResourceMode;
                         match self {
                             $(Self::$mode_name(s) => s.deinit(),)*
-                            _ => {}
-                        }
-                    }
-
-                    pub async fn command(&self, cmd: u8, buf: &mut &[u8], response: &mut $crate::viking::Writer<'_>) -> Result<(), ()> {
-                        use $crate::viking::ResourceMode;
-                        match self {
-                            $(Self::$mode_name(s) => s.command(cmd, buf, response).await,)*
-                            _ => Err(())
-                        }
-                    }
-
-                    pub fn poll_event(&self, resource: u8, buf: &mut $crate::viking::Writer<'_>) {
-                        use $crate::viking::ResourceMode;
-                        match self {
-                            $(Self::$mode_name(s) => s.poll_event(resource, buf),)*
                             _ => {}
                         }
                     }
@@ -203,12 +180,15 @@ macro_rules! viking{
                     }
                 }
 
-                async fn configure(&mut self, resource: u8, mode: u8, config: &[u8]) -> Result<(), ()> {
+                fn configure(&mut self, resource: u8, mode: u8, config: &[u8]) -> Result<(), ()> {
                     match resource {
                         $(
                             $resource_id => {
                                 if let Some(r) = self.$resource_name.take() { r.deinit() }
-                                self.$resource_name = Some($resource_name::init(mode, config)?);
+                                self.$resource_name = Some(match mode {
+                                    $($mode_id => $resource_name::$mode_name(<$mode_ty as $crate::viking::ResourceMode>::init(config)?),)*
+                                    _ => return Err(())
+                                });
                                 Ok(())
                             }
                         )*
@@ -217,19 +197,24 @@ macro_rules! viking{
                 }
 
                 async fn command(&self, resource: u8, command: u8, buf: &mut &[u8], response: &mut $crate::viking::Writer<'_>) -> Result<(), ()> {
+                    use $crate::viking::ResourceMode;
                     match resource {
-                        $($resource_id => self.$resource_name
-                            .as_ref().ok_or(())?
-                            .command(command, buf, response).await,
+                        $(
+                            $resource_id => match &self.$resource_name {
+                                $(Some($resource_name::$mode_name(s)) => s.command(command, buf, response).await,)*
+                                _ => Err(())
+                            }
                         )*
                         _ => Err(())
                     }
                 }
 
                 fn poll_all(&self, buf: &mut $crate::viking::Writer) {
+                    use $crate::viking::ResourceMode;
                     $(
-                        if let Some(r) = self.$resource_name.as_ref() {
-                            r.poll_event($resource_id, buf)
+                        match &self.$resource_name {
+                            $(Some($resource_name::$mode_name(s)) => s.poll_event($resource_id, buf),)*
+                            _ => {}
                         }
                     )*
                 }
