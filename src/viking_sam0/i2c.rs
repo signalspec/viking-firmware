@@ -1,13 +1,13 @@
 use core::{cell::Cell, marker::PhantomData};
 
-use atsamd_hal::{ehal::spi::Mode, gpio::{PinId, B}, pac::{interrupt, sercom0::{self, RegisterBlock, I2CM}, Interrupt, SERCOM0, SERCOM1}, sercom::Sercom};
-use lilos::exec::Notify;
+use zeptos::samd::{gpio::TypePin, pac::{interrupt, sercom0::{self, RegisterBlock, I2CM}, Interrupt, SERCOM0, SERCOM1}};
+use zeptos::samd::gpio::{ IoPin, AlternateFunc };
 use defmt::{debug, info, Format};
 
 use viking_protocol::protocol::i2c;
 use viking_protocol::AsBytes;
 
-use crate::{viking::{const_bytes, take_first, take_len, ResourceMode, Writer}, viking_sam0::{pin::IoPin, sercom::DynSercom, AlternateFunc}};
+use crate::{viking::{const_bytes, take_first, take_len, ResourceMode, Writer}, viking_sam0::sercom::{ Sercom, DynSercom }};
 
 #[derive(Clone, Copy, Debug, PartialEq, Format)]
 enum State {
@@ -86,7 +86,7 @@ impl<S: Sercom> ResourceMode for SercomI2C<S> {
 
 pub struct SercomSCLPin<P, S, M>(PhantomData<(P, S, M)>);
 
-impl<P: PinId, S: Sercom, M: AlternateFunc> ResourceMode for SercomSCLPin<P, S, M> {
+impl<P: TypePin, S: Sercom, M: AlternateFunc> ResourceMode for SercomSCLPin<P, S, M> {
     fn describe() -> &'static [u8] {
         const_bytes!(
             i2c::scl::DescribeMode {
@@ -96,19 +96,19 @@ impl<P: PinId, S: Sercom, M: AlternateFunc> ResourceMode for SercomSCLPin<P, S, 
     }
 
     fn init(config: &[u8]) -> Result<Self, ()> {
-        info!("sercom SCL init {:?} {:?}", P::DYN.group as u8, P::DYN.num);
-        IoPin::<P>::alternate(M::DYN);
+        info!("sercom SCL init {:?} {:?}", P::DYN.group, P::DYN.pin);
+        P::set_alternate(M::DYN);
         Ok(Self(PhantomData))
     }
 
     fn deinit(self) {
-        IoPin::<P>::reset();
+        P::set_io();
     }
 }
 
 pub struct SercomSDAPin<P, S, M>(PhantomData<(P, S, M)>);
 
-impl<P: PinId, S, M: AlternateFunc> ResourceMode for SercomSDAPin<P, S, M> {
+impl<P: TypePin, S, M: AlternateFunc> ResourceMode for SercomSDAPin<P, S, M> {
     fn describe() -> &'static [u8] {
         const_bytes!(
             i2c::sda::DescribeMode {
@@ -118,13 +118,13 @@ impl<P: PinId, S, M: AlternateFunc> ResourceMode for SercomSDAPin<P, S, M> {
     }
 
     fn init(config: &[u8]) -> Result<Self, ()> {
-        info!("sercom SDA init {:?} {:?}", P::DYN.group as u8, P::DYN.num);
-        IoPin::<P>::alternate(M::DYN);
+        info!("sercom SDA init {:?} {:?}", P::DYN.group, P::DYN.pin);
+        P::set_alternate(M::DYN);
         Ok(Self(PhantomData))
     }
 
     fn deinit(self) {
-        IoPin::<P>::reset();
+        P::set_io();
     }
 }
 
@@ -188,7 +188,7 @@ async fn start(sercom: DynSercom, addr: u8, state: &Cell<State>) -> u8 {
     if check_error(regs).is_err() {
         state.set(State::Nack);
         1
-    } else if (addr & 0x01 != 0) {
+    } else if addr & 0x01 != 0 {
         state.set(State::ReadFirst);
         0
     } else {

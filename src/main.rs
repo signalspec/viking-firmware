@@ -1,40 +1,23 @@
 #![no_std]
 #![no_main]
-#![allow(unused)] // TODO
+//#![allow(unused)] // TODO
+#![feature(impl_trait_in_assoc_type)]
 
-use core::borrow::BorrowMut;
-use core::cell::{Cell, RefCell, UnsafeCell};
+use core::cell::RefCell;
 use core::convert::Infallible;
 use core::future::{Future, poll_fn};
-use core::marker::PhantomData;
 use core::mem;
-use core::ops::Not;
 use core::pin::pin;
 use core::ptr::addr_of_mut;
 use core::task::Poll;
 
-use cortex_m::peripheral;
 use futures_util::future::{Fuse, FusedFuture};
 use futures_util::FutureExt;
-use hal::gpio::{Alternate, Pin, C};
-use lilos::exec::Notify;
 use panic_probe as _;
 use defmt_rtt as _;
 
-pub use atsamd_hal as hal;
+use defmt::info;
 
-pub use cortex_m_rt::entry;
-
-pub use hal::pac;
-
-use hal::clock::GenericClockController;
-use hal::pac::{CorePeripherals, Interrupt, Peripherals};
-use hal::{gpio, prelude::*, serial_number };
-use hal::sercom::Sercom0;
-
-use defmt::{error, info};
-
-mod usb;
 mod viking;
 mod viking_sam0;
 mod delay;
@@ -44,238 +27,207 @@ static mut BULK_IN_BUF: UsbBuffer<128> = UsbBuffer::new();
 static mut EVT_IN_BUF1: UsbBuffer<64> = UsbBuffer::new();
 static mut EVT_IN_BUF2: UsbBuffer<64> = UsbBuffer::new();
 
-static EVENT_CHANGE: Notify = Notify::new();
-
-#[entry]
-fn main() -> ! {
-    let mut peripherals = unsafe { Peripherals::steal() };
-    let mut core = unsafe { CorePeripherals::steal() };
-    let mut clocks = GenericClockController::with_internal_32kosc(
-        peripherals.GCLK,
-        &mut peripherals.PM,
-        &mut peripherals.SYSCTRL,
-        &mut peripherals.NVMCTRL,
-    );
-    let pins = gpio::Pins::new(peripherals.PORT);
-
+#[zeptos::main]
+async fn main(rt: zeptos::Runtime, mut hw: zeptos::Hardware) {
     info!("init");
-    let mut delay = delay::Delay::<48_000_000>::new(core.SYST);
 
-    let gclk0 = clocks.gclk0();
+    let pm = unsafe { zeptos::samd::pac::PM::steal() };
+    let mut gclk = unsafe { zeptos::samd::pac::GCLK::steal() };
+    let eic = unsafe { zeptos::samd::pac::EIC::steal() };
 
-    peripherals.PM.apbcmask.write(|w| {
+    pm.apbcmask.write(|w| {
         w.sercom0_().set_bit();
         w.sercom1_().set_bit()
     });
 
-    peripherals.PM.ahbmask.write(|w| {
-        w.usb_().set_bit()
-    });
+    eic.ctrl.write(|w| w.enable().set_bit());
 
-    peripherals.EIC.ctrl.write(|w| w.enable().set_bit());
-
-    let _sercom0_clock = &clocks.sercom0_core(&gclk0).unwrap();
-    let _sercom1_clock = &clocks.sercom1_core(&gclk0).unwrap();
+    zeptos::samd::clock::enable_clock(&mut gclk, zeptos::samd::pac::gclk::clkctrl::IDSELECT_A::SERCOM0_CORE, zeptos::samd::pac::gclk::clkctrl::GENSELECT_A::GCLK0);
+    zeptos::samd::clock::enable_clock(&mut gclk, zeptos::samd::pac::gclk::clkctrl::IDSELECT_A::SERCOM1_CORE, zeptos::samd::pac::gclk::clkctrl::GENSELECT_A::GCLK0);
 
     unsafe {
         cortex_m::peripheral::NVIC::unmask(Interrupt::SERCOM0);
         cortex_m::peripheral::NVIC::unmask(Interrupt::EIC);
     }
 
-    let usb_clock = &clocks.usb(&gclk0).unwrap();
-
-    let mut usb = usb::Usb::new(&usb_clock, pins.pa24, pins.pa25, peripherals.USB);
-    usb.attach();
-
-    let bulk_eps = Cell::new(None);
-    let evt_ep = Cell::new(None);
-    let bulk_eps_notify = Notify::new();
-
     let viking = RefCell::new(viking_impl::State::new());
+    let syst = RefCell::new(hw.syst);
 
-    struct Handler<'a> {
-        bulk_eps: &'a Cell<Option<(usb::Endpoint<Out, 0x01>, usb::Endpoint<In, 0x82>)>>,
-        evt_ep: &'a Cell<Option<(usb::Endpoint<In, 0x83>)>>,
-        bulk_eps_notify: &'a Notify,
-        viking: &'a RefCell<viking_impl::State>,
-    }
-    impl usb::Handler for Handler<'_> {
-        fn get_descriptor(&self, kind: u8, index: u8) -> Option<&[u8]> {
-            use ::usb::descriptor_type::{CONFIGURATION, DEVICE, BOS};
-            match (kind, index) {
-                (DEVICE, _) => Some(DEVICE_DESCRIPTOR),
-                (CONFIGURATION, 0) => Some(CONFIG_DESCRIPTOR),
-                (BOS, 0) => Some(BOS_DESCRIPTOR),
-                _ => None,
-            }
-        }
-
-        fn get_string_descriptor(&self, index: u8, _lang: u16) -> Option<StringDecriptor<128>> {
-            match index {
-                0 => Some(StringDecriptor::language_list()),
-                STRING_MFG => Some(StringDecriptor::new("signalspec project")),
-                STRING_PRODUCT => Some(StringDecriptor::new("samd21 test device")),
-                STRING_SERIAL => Some(StringDecriptor::new_hex(&serial_number())),
-                _ => None,
-            }
-        }
-
-        async fn set_configuration(&self, cfg: u8, usb: &Usb) -> Result<(), ()> {
-            if cfg == 1 {
-                let ep_out = usb.configure_ep_out::<0x01>();
-                let ep_in = usb.configure_ep_in::<0x82>();
-                let evt_in = usb.configure_ep_in::<0x83>();
-
-                self.bulk_eps.set(Some((ep_out, ep_in)));
-                self.evt_ep.set(Some(evt_in));
-                self.bulk_eps_notify.notify();
-
-                Ok(())
-            } else {
-                Err(())
-            }
-        }
-
-        async fn set_interface(&self, intf: u8, alt: u8, usb: &Usb) -> Result<(), ()> {
-            if intf == 0 && alt == 0 {
-                Ok(())
-            } else {
-                Err(())
-            }
-        }
-
-        async fn handle_control<'a>(&self, req: Setup<'a>, usb: &Usb) {
-            use usb::ControlType::*;
-            use usb::Recipient::*;
-            use usb::ControlData::{In, Out};
-
-            pub const I_VIKING: u16 = INTF_VIKING as u16;
-
-            use viking_protocol::request::{CONFIGURE_MODE, DESCRIBE_MODE, LIST_MODES, LIST_RESOURCES};
-
-            match req {
-                Setup { ty: Vendor, recipient: Device, request: MSOS_VENDOR_CODE, index: 0x07, data: In(data), .. } => {
-                    data.respond(&MSOS_DESCRIPTOR).await;
-                }
-
-                Setup { ty: Vendor, recipient: Interface, index: I_VIKING, request: LIST_RESOURCES, data: In(data), .. } => {
-                    data.respond(viking_impl::State::RESOURCE_NAMES.as_bytes()).await;
-                }
-
-                Setup { ty: Vendor, recipient: Interface, index: I_VIKING, value, request: LIST_MODES, data: In(data), .. } => {
-                    let resource = (value >> 8) as u8;
-                    if let Some(modes) = viking_impl::State::mode_names(resource) {
-                        data.respond(modes.as_bytes()).await;
-                    } else {
-                        data.reject();
-                    }
-                }
-
-                Setup { ty: Vendor, recipient: Interface, index: I_VIKING, value, request: DESCRIBE_MODE, data: In(data), .. } => {
-                    let resource = (value >> 8) as u8;
-                    let mode = (value & 0xff) as u8;
-                    if let Some(mode) = viking_impl::State::describe(resource, mode) {
-                        data.respond(mode).await;
-                    } else {
-                        data.reject();
-                    }
-                }
-
-                Setup { ty: Vendor, recipient: Interface, index: I_VIKING, value, request: CONFIGURE_MODE, data: Out(data), .. } => {
-                    let resource = (value >> 8) as u8;
-                    let mode = (value & 0xff) as u8;
-                    info!("configure {} {}", resource, mode);
-
-                    let Ok(mut resources) = self.viking.try_borrow_mut() else {
-                        info!("busy");
-                        data.reject();
-                        return;
-                    };
-
-                    if resources.configure(resource, mode, &[]).is_ok() {
-                        data.accept().await;
-                    } else {
-                        data.reject();
-                    }
-                }
-
-                unknown => unknown.reject(),
-            }
-        }
-    }
-
-    let usb_task = pin!(usb.handle(Handler {
-        bulk_eps: &bulk_eps,
-        evt_ep: &evt_ep,
-        bulk_eps_notify: &bulk_eps_notify,
-        viking: &viking
-    }));
-
-    let bulk_task = pin!(async {
-        loop {
-            let buf_out = unsafe { &mut *addr_of_mut!(BULK_OUT_BUF) };
-            let buf_in = unsafe { &mut *addr_of_mut!(BULK_IN_BUF) };
-            let (ep_out, ep_in) = bulk_eps_notify.until(|| bulk_eps.take() ).await;
-
-            loop {
-                let len = ep_out.transfer(buf_out).await;
-                info!("bulk read {}: {:?}", len, &buf_out[..len]);
-
-                let mut response = Writer::new(&mut buf_in[..], 1);
-                
-                let status = match viking.borrow().run(&buf_out[..len], &mut response, &mut delay).await {
-                    Ok(_) => 0,
-                    Err(_) => 1,
-                };
-                
-                let response_len = response.offset();
-                buf_in[0] = status;
-                ep_in.transfer(buf_in, response_len, true).await;
-                info!("bulk write complete");
-            }
-        }
-    });
-
-    let evt_task = pin!(async {
-        loop {
-            let mut buf_fill = unsafe { addr_of_mut!(EVT_IN_BUF1) };
-            let mut buf_send = unsafe { addr_of_mut!(EVT_IN_BUF2) };
-            let evt_ep = bulk_eps_notify.until(|| evt_ep.take() ).await;
-
-            let mut transfer = pin!(Fuse::terminated());
-            let mut buf = Writer::new(unsafe { &mut (*buf_fill)[..] }, 0);
-
-            poll_fn(|cx| -> Poll<Infallible> {
-                EVENT_CHANGE.subscribe(cx.waker());
-                viking.borrow().poll_all(cx.waker(), &mut buf);
-
-                transfer.as_mut().poll(cx);
-                info!("Events: {:?} {} {:?}", buf_fill, buf.offset(), transfer.is_terminated());
-
-                if transfer.is_terminated() && buf.offset() > 0 {
-                    let len = buf.offset();
-                    buf = Writer::new(unsafe { &mut (*buf_send)[..] }, 0);
-                    info!("Sending events: {}", len);
-                    transfer.set(evt_ep.transfer(unsafe { &mut *buf_fill }, len, true).fuse());
-                    transfer.as_mut().poll(cx);
-                    mem::swap(&mut buf_fill, &mut buf_send);
-                }
-
-                Poll::Pending
-            }).await;
-        }
-    });
-
-    lilos::exec::run_tasks(
-        &mut [usb_task, bulk_task, evt_task],
-        lilos::exec::ALL_TASKS,
-    );
+    hw.usb.run_device(Handler {
+        rt,
+        syst: unsafe { mem::transmute(&syst) },
+        viking: unsafe { mem::transmute(&viking) },
+    }).await;
 }
 
-use usb::descriptors::{Config, Device, Endpoint, Interface, StringDecriptor, BinaryObjectStore, PlatformCapabilityMicrosoftOs, MicrosoftOs, MicrosoftOsConfiguration, MicrosoftOsFunction, MicrosoftOsCompatibleID, MicrosoftOsDeviceInterfaceGUID};
-use usb::{In, UsbBuffer};
+struct Handler {
+    rt: Runtime,
+    syst: &'static RefCell<SysTick>,
+    viking: &'static RefCell<viking_impl::State>,
+}
 
-use crate::usb::{Out, Setup, Usb};
+impl zeptos::usb::Handler for Handler {
+    fn get_descriptor<'a>(&self, kind: u8, index: u8, _lang: u16, builder: &'a mut DescriptorBuilder) -> Option<&'a [u8]> {
+        use ::usb::descriptor_type::{CONFIGURATION, DEVICE, BOS, STRING};
+        match (kind, index) {
+            (DEVICE, _) => Some(DEVICE_DESCRIPTOR),
+            (CONFIGURATION, 0) => Some(CONFIG_DESCRIPTOR),
+            (BOS, 0) => Some(BOS_DESCRIPTOR),
+            (STRING, 0) => Some(LANGUAGE_LIST_US_ENGLISH),
+            (STRING, STRING_MFG) => Some(builder.string_ascii("signalspec project")),
+            (STRING, STRING_PRODUCT) => Some(builder.string_ascii("samd21 test device")),
+            (STRING, STRING_SERIAL) => Some(builder.string_hex(&zeptos::samd::serial_number())),
+            _ => None,
+        }
+    }
+
+    async fn set_configuration(&self, cfg: u8, usb: &mut Endpoints) -> Result<(), ()> {
+        if cfg == 1 {
+            bulk_task(self.rt).cancel();
+            evt_task(self.rt).cancel();
+
+            let ep_out = usb.bulk_out::<0x01>();
+            let ep_in = usb.bulk_in::<0x82>();
+            let ep_evt = usb.bulk_in::<0x83>();
+
+            bulk_task(self.rt).spawn(self.viking, ep_out, ep_in, self.syst);
+            evt_task(self.rt).spawn(self.viking, ep_evt);
+            Ok(())
+        } else {
+            Err(())
+        }
+    }
+
+    async fn set_interface(&self, intf: u8, alt: u8, _usb: &mut Endpoints) -> Result<(), ()> {
+        if intf == 0 && alt == 0 {
+            Ok(())
+        } else {
+            Err(())
+        }
+    }
+
+    async fn handle_control<'a>(&self, req: Setup<'a>) -> Responded {
+        use zeptos::usb::ControlType::*;
+        use zeptos::usb::Recipient::*;
+        use zeptos::usb::ControlData::{In, Out};
+
+        pub const I_VIKING: u16 = INTF_VIKING as u16;
+
+        use viking_protocol::request::{CONFIGURE_MODE, DESCRIBE_MODE, LIST_MODES, LIST_RESOURCES};
+
+        match req {
+            Setup { ty: Vendor, recipient: Device, request: MSOS_VENDOR_CODE, index: 0x07, data: In(data), .. } => {
+                data.respond(&MSOS_DESCRIPTOR).await
+            }
+
+            Setup { ty: Vendor, recipient: Interface, index: I_VIKING, request: LIST_RESOURCES, data: In(data), .. } => {
+                data.respond(viking_impl::State::RESOURCE_NAMES.as_bytes()).await
+            }
+
+            Setup { ty: Vendor, recipient: Interface, index: I_VIKING, value, request: LIST_MODES, data: In(data), .. } => {
+                let resource = (value >> 8) as u8;
+                if let Some(modes) = viking_impl::State::mode_names(resource) {
+                    data.respond(modes.as_bytes()).await
+                } else {
+                    data.reject()
+                }
+            }
+
+            Setup { ty: Vendor, recipient: Interface, index: I_VIKING, value, request: DESCRIBE_MODE, data: In(data), .. } => {
+                let resource = (value >> 8) as u8;
+                let mode = (value & 0xff) as u8;
+                if let Some(mode) = viking_impl::State::describe(resource, mode) {
+                    data.respond(mode).await
+                } else {
+                    data.reject()
+                }
+            }
+
+            Setup { ty: Vendor, recipient: Interface, index: I_VIKING, value, request: CONFIGURE_MODE, data: Out(data), .. } => {
+                let resource = (value >> 8) as u8;
+                let mode = (value & 0xff) as u8;
+                info!("configure {} {}", resource, mode);
+
+                let Ok(mut resources) = self.viking.try_borrow_mut() else {
+                    info!("busy");
+                    return data.reject();
+                };
+
+                if resources.configure(resource, mode, &[]).is_ok() {
+                    data.accept().await
+                } else {
+                    data.reject()
+                }
+            }
+
+            unknown => unknown.reject(),
+        }
+    }
+}
+
+#[zeptos::task]
+async fn bulk_task(viking: &'static RefCell<viking_impl::State>, mut ep_out: zeptos::usb::Endpoint<Out, EP_OUT>, mut ep_in: zeptos::usb::Endpoint<In, EP_IN>, delay: &'static RefCell<SysTick>) {
+    loop {
+        let buf_out = unsafe { &mut *addr_of_mut!(BULK_OUT_BUF) };
+        let buf_in = unsafe { &mut *addr_of_mut!(BULK_IN_BUF) };
+
+        loop {
+            let len = ep_out.receive(buf_out).await;
+            info!("bulk read {}: {:?}", len, &buf_out[..len]);
+
+            let mut response = Writer::new(&mut buf_in[..], 1);
+            
+            let status = match viking.borrow().run(&buf_out[..len], &mut response, &mut *delay.borrow_mut()).await {
+                Ok(_) => 0,
+                Err(_) => 1,
+            };
+            
+            let response_len = response.offset();
+            buf_in[0] = status;
+            ep_in.send(buf_in, response_len, true).await;
+            info!("bulk write complete");
+        }
+    }
+}
+
+#[zeptos::task]
+async fn evt_task(viking: &'static RefCell<viking_impl::State>, mut ep_evt: zeptos::usb::Endpoint<In, EP_EVT>,) {
+    let ep_evt = RefCell::new(ep_evt);
+    loop {
+        let mut buf_fill = unsafe { addr_of_mut!(EVT_IN_BUF1) };
+        let mut buf_send = unsafe { addr_of_mut!(EVT_IN_BUF2) };
+
+        let mut transfer = pin!(Fuse::terminated());
+        let mut buf = Writer::new(unsafe { &mut (*buf_fill)[..] }, 0);
+
+        poll_fn(|cx| -> Poll<Infallible> {
+            //EVENT_CHANGE.subscribe(cx.waker());
+            viking.borrow().poll_all(cx.waker(), &mut buf);
+
+            let _ = transfer.as_mut().poll(cx);
+            info!("Events: {:?} {} {:?}", buf_fill, buf.offset(), transfer.is_terminated());
+
+            if transfer.is_terminated() && buf.offset() > 0 {
+                let len = buf.offset();
+                buf = Writer::new(unsafe { &mut (*buf_send)[..] }, 0);
+                info!("Sending events: {}", len);
+                let mut ep_evt = ep_evt.borrow_mut();
+                transfer.set(async move { ep_evt.send(unsafe { &mut *buf_fill }, len, true).await }.fuse());
+                let _ = transfer.as_mut().poll(cx);
+                mem::swap(&mut buf_fill, &mut buf_send);
+            }
+
+            Poll::Pending
+        }).await;
+    }
+}
+
+use zeptos::cortex_m::SysTick;
+use zeptos::samd::pac::Interrupt;
+use zeptos::usb::descriptors::{descriptors, BinaryObjectStore, Config, DescriptorBuilder, Device, Endpoint, Interface, MicrosoftOs, MicrosoftOsCompatibleID, PlatformCapabilityMicrosoftOs, LANGUAGE_LIST_US_ENGLISH };
+use zeptos::usb::{Endpoints, In, Out, Responded, Setup, UsbBuffer};
+use zeptos::Runtime;
+
 use crate::viking::{Resources, Writer};
 
 const INTF_VIKING: u8 = 0;
@@ -284,10 +236,14 @@ const STRING_MFG: u8 = 1;
 const STRING_PRODUCT: u8 = 2;
 const STRING_SERIAL: u8 = 3;
 
+const EP_OUT: u8 = 0x01;
+const EP_IN: u8 = 0x82;
+const EP_EVT: u8 = 0x83;
+
 static DEVICE_DESCRIPTOR: &[u8] = descriptors! {
     Device {
         bcdUSB: 0x0201,
-        bDeviceClass: ::usb::class::VENDOR_SPECIFIC,
+        bDeviceClass: usb::class_code::VENDOR_SPECIFIC,
         bDeviceSubClass: 0x00,
         bDeviceProtocol: 0x00,
         bMaxPacketSize0: 64,
@@ -317,21 +273,21 @@ static CONFIG_DESCRIPTOR: &[u8] = descriptors!{
             iInterface: 0,
 
             +Endpoint {
-                bEndpointAddress: 0x01,
+                bEndpointAddress: EP_OUT,
                 bmAttributes: 0b10,
                 wMaxPacketSize: 64,
                 bInterval: 0,
             }
 
             +Endpoint {
-                bEndpointAddress: 0x82,
+                bEndpointAddress: EP_IN,
                 bmAttributes: 0b10,
                 wMaxPacketSize: 64,
                 bInterval: 0,
             }
 
             +Endpoint {
-                bEndpointAddress: 0x83,
+                bEndpointAddress: EP_EVT,
                 bmAttributes: 0b10,
                 wMaxPacketSize: 64,
                 bInterval: 0,
@@ -367,10 +323,10 @@ static BOS_DESCRIPTOR: &[u8] = descriptors!{
 viking::viking!(
     viking_impl {
         use {
+            zeptos::samd::gpio::*,
+            zeptos::samd::gpio::alternate::*,
             crate::viking_sam0,
-            atsamd_hal::gpio::*,
-            atsamd_hal::sercom::*,
-            crate::viking_sam0::alternate::C,
+            crate::viking_sam0::Sercom0,
         };
 
         pa08(1) {

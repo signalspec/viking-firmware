@@ -1,17 +1,16 @@
 use core::{cell::Cell, marker::PhantomData, task::Waker};
 
-use super::pin::{PinId, IoPin};
-use defmt::{debug, info};
-use lilos::exec::Notify;
+use zeptos::{executor::{Interrupt, TaskOnly}, samd::gpio::{Alternate, TypePin}};
+use defmt::info;
 use viking_protocol::protocol::gpio;
 use viking_protocol::AsBytes;
-use atsamd_hal::pac::{eic::config, interrupt, EIC};
+use zeptos::samd::pac::{interrupt, EIC};
 
-use crate::{viking::{const_bytes, ResourceMode, Writer}, viking_sam0::pin::Alternate, EVENT_CHANGE};
+use crate::viking::{const_bytes, ResourceMode, Writer};
 
 pub struct Gpio<P>(PhantomData<P>);
 
-impl<P: PinId> ResourceMode for Gpio<P> {
+impl<P: TypePin> ResourceMode for Gpio<P> {
     fn describe() -> &'static [u8] {
         const_bytes!(
             gpio::pin::DescribeMode {
@@ -20,16 +19,16 @@ impl<P: PinId> ResourceMode for Gpio<P> {
         )
     }
 
-    fn init(config: &[u8]) -> Result<Self, ()> {
-        info!("gpio init {:?} {:?}", P::DYN.group as u8, P::DYN.num);
-        IoPin::<P>::pincfg().write(|w| w.inen().set_bit());
-        IoPin::<P>::enable_sampling();
+    fn init(_config: &[u8]) -> Result<Self, ()> {
+        info!("gpio init {:?} {:?}", P::DYN.group, P::DYN.pin);
+        P::pincfg().write(|w| w.inen().set_bit());
+        P::enable_sampling();
         Ok(Gpio(PhantomData))
     }
 
     fn deinit(self) {
         info!("gpio deinit");
-        IoPin::<P>::dirclr();
+        P::dirclr();
     }
 
     async fn command(&self, command: u8, buf: &mut &[u8], response: &mut Writer<'_>) -> Result<(), ()> {
@@ -37,22 +36,22 @@ impl<P: PinId> ResourceMode for Gpio<P> {
         
         match command {
             cmd::FLOAT => {
-                IoPin::<P>::dirclr();
+                P::dirclr();
                 Ok(())
             }
             cmd::READ => {
-                let byte: u8 = if IoPin::<P>::read() { 0x01 } else { 0x00 };
+                let byte: u8 = if P::read() { 0x01 } else { 0x00 };
                 response.put(byte)?;
                 Ok(())
             }
             cmd::LOW => {
-                IoPin::<P>::outclr();
-                IoPin::<P>::dirset();
+                P::outclr();
+                P::dirset();
                 Ok(())
             }
             cmd::HIGH => {
-                IoPin::<P>::outset();
-                IoPin::<P>::dirset();
+                P::outset();
+                P::dirset();
                 Ok(())
             }
             _ => Err(())
@@ -66,7 +65,7 @@ pub struct LevelInterrupt<P, const CH: u8>{
     event: Cell<Option<bool>>,
 }
 
-impl<P: PinId, const CH: u8> ResourceMode for LevelInterrupt<P, CH> {
+impl<P: TypePin, const CH: u8> ResourceMode for LevelInterrupt<P, CH> {
     fn describe() -> &'static [u8] {
         const_bytes!(
             gpio::level_interrupt::DescribeMode {
@@ -76,14 +75,14 @@ impl<P: PinId, const CH: u8> ResourceMode for LevelInterrupt<P, CH> {
     }
 
     fn init(config: &[u8]) -> Result<Self, ()> {
-        info!("level_interrupt init {:?} {:?}", P::DYN.group as u8, P::DYN.num);
-        IoPin::<P>::alternate(Alternate::A);
+        info!("level_interrupt init {:?} {:?}", P::DYN.group, P::DYN.pin);
+        P::set_alternate(Alternate::A);
         Ok(LevelInterrupt { _p: PhantomData, event: Cell::new(None) })
     }
 
     fn deinit(self) {
         info!("level_interrupt deinit");
-        IoPin::<P>::reset();
+        P::set_io();
     }
 
     async fn command(&self, command: u8, buf: &mut &[u8], response: &mut Writer<'_>) -> Result<(), ()> {
@@ -103,7 +102,7 @@ impl<P: PinId, const CH: u8> ResourceMode for LevelInterrupt<P, CH> {
         if event.is_none() {
             wait_interrupt(CH).await;
         } else {
-            EVENT_CHANGE.notify();
+            //EVENT_CHANGE.notify();
         }
 
         Ok(())
@@ -117,13 +116,13 @@ impl<P: PinId, const CH: u8> ResourceMode for LevelInterrupt<P, CH> {
                     self.event.set(None);
                 }
             } else {
-                IRQ.subscribe(waker);
+                unsafe { INT.get_unchecked() }.subscribe(waker);
             }
         }
     }
 }
 
-type Sense = atsamd_hal::pac::eic::config::SENSE0SELECT_A;
+type Sense = zeptos::samd::pac::eic::config::SENSE0SELECT_A;
 
 fn configure_interrupt(ch: u8, sense: Sense) {
     let eic = unsafe { EIC::steal() };
@@ -148,17 +147,17 @@ fn configure_interrupt(ch: u8, sense: Sense) {
 
 async fn wait_interrupt(ch: u8) {
     let eic = unsafe { EIC::steal() };
-    IRQ.until(|| {
+    scopeguard::defer! {
+        eic.intenclr.write(|w| unsafe { w.bits(1 << ch) });
+    };
+    unsafe { INT.get_unchecked() }.until(|| {
         eic.intflag.read().bits() & (1<<ch) != 0
     }).await;
-    eic.intenclr.write(|w| unsafe { w.bits(1 << ch) });
 }
-
-static IRQ: Notify = Notify::new();
+static INT: TaskOnly<Interrupt> = unsafe { TaskOnly::new(Interrupt::new()) };
 
 #[interrupt]
 fn EIC() {
     let eic = unsafe { EIC::steal() };
-    eic.intenclr.write(|w| unsafe { w.bits(eic.intflag.read().bits()) });
-    IRQ.notify();
+    unsafe { INT.get_unchecked().notify(); }
 }

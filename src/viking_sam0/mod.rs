@@ -1,6 +1,5 @@
-mod pin;
-pub use pin::{alternate, Alternate, AlternateFunc};
 mod sercom;
+pub use sercom::Sercom0;
 
 mod gpio;
 pub use gpio::{Gpio, LevelInterrupt};

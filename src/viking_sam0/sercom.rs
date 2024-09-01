@@ -1,8 +1,13 @@
-use atsamd_hal::pac::{sercom0::RegisterBlock, Interrupt, SERCOM0, SERCOM1, interrupt};
-use lilos::exec::Notify;
+use zeptos::{executor::{Interrupt, TaskOnly}, samd::pac::{interrupt, sercom0::RegisterBlock, SERCOM0, SERCOM1}};
 
-const NEW_NOTIFY: Notify = Notify::new();
-static IRQ: [Notify; 6] = [NEW_NOTIFY; 6];
+pub trait Sercom {
+    const NUM: usize;
+}
+pub struct Sercom0;
+
+impl Sercom for Sercom0 {
+    const NUM: usize = 0;
+}
 
 pub(crate) struct DynSercom(pub(crate) usize);
 
@@ -11,16 +16,15 @@ impl DynSercom {
         unsafe { &*(SERCOM0::PTR.byte_offset((SERCOM1::PTR as usize - SERCOM0::PTR as usize) as isize * self.0 as isize) ) }
     }
 
-    pub(crate) fn notify(&self) -> &Notify {
-        &IRQ[self.0]
+    pub(crate) fn notify(&self) -> &Interrupt {
+        unsafe { INT.get_unchecked() }
     }
 }
+
+static INT: TaskOnly<Interrupt> = unsafe { TaskOnly::new(Interrupt::new()) };
 
 #[interrupt]
 fn SERCOM0() {
     let sercom = unsafe { SERCOM0::steal() };
-    sercom.i2cm().intenclr.write(|w| {
-        unsafe { w.bits(sercom.i2cm().intflag.read().bits()) }
-    });
-    IRQ[0].notify();
+    unsafe { INT.get_unchecked().notify() };
 }

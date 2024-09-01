@@ -1,7 +1,6 @@
-use core::{mem, task::Waker};
+use core::task::Waker;
 
-use defmt::{error, info};
-use viking_protocol::AsBytes;
+use defmt::info;
 
 use crate::delay::AsyncDelayUs;
 

@@ -1,13 +1,14 @@
-use core::{cell::Cell, marker::PhantomData, mem::take};
+use core::marker::PhantomData;
 
-use atsamd_hal::{ehal::spi::Mode, gpio::{PinId, B}, pac::{interrupt, sercom0::{self, RegisterBlock, I2CM}, Interrupt, SERCOM0, SERCOM1}, sercom::Sercom};
-use lilos::exec::Notify;
-use defmt::{debug, info, Format};
+use zeptos::samd::{gpio::{AlternateFunc, TypePin}, pac::sercom0::I2CM};
+use defmt::info;
 
 use viking_protocol::{protocol::spi, U32};
 use viking_protocol::AsBytes;
 
-use crate::{viking::{const_bytes, take_first, take_len, ResourceMode, Writer}, viking_sam0::{pin::IoPin, sercom::DynSercom, AlternateFunc}};
+use crate::{viking::{const_bytes, take_first, take_len, ResourceMode, Writer}, viking_sam0::sercom::DynSercom};
+
+use super::sercom::Sercom;
 
 pub struct SercomSPI<S, const DOPO: u8, const DIPO: u8> {
     _p: PhantomData<S>,
@@ -28,7 +29,7 @@ impl<S: Sercom, const DOPO: u8, const DIPO: u8> ResourceMode for SercomSPI<S, DO
         )
     }
 
-    fn init(config: &[u8]) -> Result<Self, ()> {
+    fn init(_config: &[u8]) -> Result<Self, ()> {
         info!("spi init");
         init(DynSercom(S::NUM), DOPO, DIPO);
         Ok(SercomSPI { _p: PhantomData })
@@ -55,7 +56,7 @@ impl<S: Sercom, const DOPO: u8, const DIPO: u8> ResourceMode for SercomSPI<S, DO
 
 pub struct SercomSCKPin<P, S, M>(PhantomData<(P, S, M)>);
 
-impl<P: PinId, S: Sercom, M: AlternateFunc> ResourceMode for SercomSCKPin<P, S, M> {
+impl<P: TypePin, S: Sercom, M: AlternateFunc> ResourceMode for SercomSCKPin<P, S, M> {
     fn describe() -> &'static [u8] {
         const_bytes!(
             spi::sck_pin::DescribeMode {
@@ -65,19 +66,19 @@ impl<P: PinId, S: Sercom, M: AlternateFunc> ResourceMode for SercomSCKPin<P, S, 
     }
 
     fn init(config: &[u8]) -> Result<Self, ()> {
-        info!("sercom SCK init {:?} {:?}", P::DYN.group as u8, P::DYN.num);
-        IoPin::<P>::alternate(M::DYN);
+        info!("sercom SCK init {:?} {:?}", P::DYN.group, P::DYN.pin);
+        P::set_alternate(M::DYN);
         Ok(Self(PhantomData))
     }
 
     fn deinit(self) {
-        IoPin::<P>::reset();
+        P::set_io();
     }
 }
 
 pub struct SercomSOPin<P, S, M>(PhantomData<(P, S, M)>);
 
-impl<P: PinId, S, M: AlternateFunc> ResourceMode for SercomSOPin<P, S, M> {
+impl<P: TypePin, S, M: AlternateFunc> ResourceMode for SercomSOPin<P, S, M> {
     fn describe() -> &'static [u8] {
         const_bytes!(
             spi::so_pin::DescribeMode {
@@ -87,19 +88,19 @@ impl<P: PinId, S, M: AlternateFunc> ResourceMode for SercomSOPin<P, S, M> {
     }
 
     fn init(config: &[u8]) -> Result<Self, ()> {
-        info!("sercom SO init {:?} {:?}", P::DYN.group as u8, P::DYN.num);
-        IoPin::<P>::alternate(M::DYN);
+        info!("sercom SO init {:?} {:?}", P::DYN.group, P::DYN.pin);
+        P::set_alternate(M::DYN);
         Ok(Self(PhantomData))
     }
 
     fn deinit(self) {
-        IoPin::<P>::reset();
+        P::set_io();
     }
 }
 
 pub struct SercomSIPin<P, S, M>(PhantomData<(P, S, M)>);
 
-impl<P: PinId, S, M: AlternateFunc> ResourceMode for SercomSIPin<P, S, M> {
+impl<P: TypePin, S, M: AlternateFunc> ResourceMode for SercomSIPin<P, S, M> {
     fn describe() -> &'static [u8] {
         const_bytes!(
             spi::si_pin::DescribeMode {
@@ -109,13 +110,13 @@ impl<P: PinId, S, M: AlternateFunc> ResourceMode for SercomSIPin<P, S, M> {
     }
 
     fn init(config: &[u8]) -> Result<Self, ()> {
-        info!("sercom SI init {:?} {:?}", P::DYN.group as u8, P::DYN.num);
-        IoPin::<P>::alternate(M::DYN);
+        info!("sercom SI init {:?} {:?}", P::DYN.group, P::DYN.pin);
+        P::set_alternate(M::DYN);
         Ok(Self(PhantomData))
     }
 
     fn deinit(self) {
-        IoPin::<P>::reset();
+        P::set_io();
     }
 }
 

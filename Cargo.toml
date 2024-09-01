@@ -4,15 +4,6 @@ version = "0.1.0"
 license = "MIT OR Apache-2.0"
 edition = "2021"
 
-# for cargo flash
-[package.metadata]
-chip = "ATSAMD21J18"
-
-[dependencies.lilos]
-git = "https://github.com/kevinmehall/lilos.git"
-rev = "81c2fea2c9cdbcd05aa4de0eaddfdb65e179b3af"
-default_features = false
-
 [dependencies.cortex-m-rt]
 version = "0.7"
 
@@ -20,15 +11,13 @@ version = "0.7"
 version = "0.7"
 features = ["critical-section-single-core", "inline-asm"]
 
-[dependencies.atsamd-hal]
-git = "https://github.com/atsamd-rs/atsamd"
-rev = "ecf2f583e15d4cadf798e31c7de425f6e6b89680"
-default-features = false
-features = ["samd21j-rt"]
+[dependencies.zeptos]
+path = "../zeptos"
+features = ["samd21", "samd-clock-48m-usb", "usb"]
 
 [dependencies.usb]
 git = "https://github.com/kevinmehall/rust-usb.git"
-rev = "a343b6f3c9de025c365202a2301d46f51adf18bf"
+rev = "cb0599102313de79d34d4be4bb37f2c25e480ba6"
 
 [dependencies]
 defmt = "0.3.6"
