@@ -27,7 +27,8 @@ impl<'a> Writer<'a> {
 }
 
 pub trait ResourceMode: Sized {
-    fn describe() -> &'static [u8];
+    const PROTOCOL: u16;
+    const DESCRIPTOR: &'static [u8];
 
     fn init(config: &[u8]) -> Result<Self, ()>;
 
@@ -55,12 +56,11 @@ pub fn take_len<'a>(buf: &mut &'a [u8]) -> Option<&'a [u8]> {
 }
 
 pub trait Resources: Sized {
-    const RESOURCE_NAMES: &'static str;
-    fn mode_names(resource: u8) -> Option<&'static str>;
-    fn describe(resource: u8, mode: u8) -> Option<&'static [u8]>;
+    const DESCRIPTOR: &'static [u8];
 
     fn new() -> Self;
-    fn configure(&mut self, resource: u8, mode: u8, config: &[u8]) -> Result<(), ()> ;
+    fn configure(&mut self, resource: u8, mode: u8, config: &[u8]) -> Result<(), ()>;
+    fn reset_all(&mut self);
     async fn command(&self, resource: u8, command: u8, buf: &mut &[u8], response: &mut Writer) -> Result<(), ()> ;
     fn poll_all(&self, waker: &Waker, buf: &mut Writer<'_>);
 
@@ -109,7 +109,7 @@ macro_rules! viking{
             )*
         }
     ) => {
-        mod $mod_name {
+        pub mod $mod_name {
 
             use {$( $use_tt )*};
 
@@ -120,22 +120,10 @@ macro_rules! viking{
                 }
 
                 impl $resource_name {
-                    pub const MODE_NAMES: &'static str = concat!(
-                        $(stringify!($mode_name), "\0"),*
-                    );
-
-                    pub fn describe(mode: u8) -> Option<&'static [u8]> {
-                        match mode {
-                            $($mode_id => Some(<$mode_ty as $crate::viking::ResourceMode>::describe()),)*
-                            _ => None,
-                        }
-                    }
-
                     pub fn deinit(self) {
                         use $crate::viking::ResourceMode;
                         match self {
                             $(Self::$mode_name(s) => s.deinit(),)*
-                            _ => {}
                         }
                     }
                 }
@@ -149,28 +137,74 @@ macro_rules! viking{
             }
 
             impl $crate::viking::Resources for State {
-                const RESOURCE_NAMES: &'static str = concat!(
-                    $(stringify!($resource_name), "\0"),*
-                );
+                const DESCRIPTOR: &'static [u8] = const {
+                    use ::viking_protocol::descriptor::*;
+                    const PARTS: &[(u8, Option<u16>, &[u8])] = &[
+                        (DESCRIPTOR_TYPE_VIKING, Some(0), &[]),
+                        $(
+                            (DESCRIPTOR_TYPE_RESOURCE, None, &[]),
+                            (DESCRIPTOR_TYPE_IDENTIFIER, None, stringify!($resource_name).as_bytes()),
+                            $(
+                                (DESCRIPTOR_TYPE_MODE,
+                                    Some(<$mode_ty as $crate::viking::ResourceMode>::PROTOCOL),
+                                    <$mode_ty as $crate::viking::ResourceMode>::DESCRIPTOR
+                                ),
+                                (DESCRIPTOR_TYPE_IDENTIFIER, None, stringify!($mode_name).as_bytes()),
+                            )*
+                        )*
+                    ];
 
-                fn mode_names(resource: u8) -> Option<&'static str> {
-                    match resource {
-                        $(
-                            $resource_id => Some($resource_name::MODE_NAMES),
-                        )*
-                        _ => None,
+                    const LEN: usize = {
+                        let mut len = 0;
+                        let mut i = 0;
+                        while i < PARTS.len() {
+                            len += 2 + 2 * PARTS[i].1.is_some() as usize + PARTS[i].2.len();
+                            i += 1;
+                        }
+                        len
+                    };
+
+                    &const {
+                        let mut bytes = [0; LEN];
+                        let mut pos = 0;
+                        let mut part = 0;
+
+                        while part < PARTS.len() {
+                            let p = &PARTS[part];
+
+                            let len = 2 + 2 * p.1.is_some() as usize + p.2.len();
+                            assert!(len < u8::MAX as usize);
+
+                            bytes[pos + 0] = len as u8;
+                            bytes[pos + 1] = p.0;
+                            pos += 2;
+
+                            if let Some(n) = p.1 {
+                                bytes[pos + 0] = n.to_le_bytes()[0];
+                                bytes[pos + 1] = n.to_le_bytes()[1];
+                                pos += 2;
+                            }
+
+                            let mut i = 0;
+                            while i < p.2.len() {
+                                bytes[pos + i] = p.2[i];
+                                i += 1;
+                            }
+                            pos += p.2.len();
+
+                            part += 1;
+                        }
+
+                        assert!(pos == LEN);
+
+                        // fill total length
+                        bytes[2] = (pos as u16).to_le_bytes()[0];
+                        bytes[3] = (pos as u16).to_le_bytes()[1];
+
+                        bytes
                     }
-                }
-                
-                fn describe(resource: u8, mode: u8) -> Option<&'static [u8]> {
-                    match resource {
-                        $(
-                            $resource_id => $resource_name::describe(mode),
-                        )*
-                        _ => None,
-                    }
-                }
-                
+                };
+
                 fn new() -> Self {
                     Self {
                         $(
@@ -193,6 +227,12 @@ macro_rules! viking{
                         )*
                         _ => Err(()),
                     }
+                }
+
+                fn reset_all(&mut self) {
+                    $(
+                        if let Some(r) = self.$resource_name.take() { r.deinit() }
+                    )*
                 }
 
                 async fn command(&self, resource: u8, command: u8, buf: &mut &[u8], response: &mut $crate::viking::Writer<'_>) -> Result<(), ()> {
@@ -227,11 +267,13 @@ pub(crate) use viking;
 
 macro_rules! const_bytes {
     ($($n:ident)::+ { $($inner:tt)* }) => {
-        {
-            static S: $($n)::* = $($n)::* {
-                $($inner)*
-            };
-            S.as_bytes()
+        const {
+            unsafe {
+                &::core::mem::transmute::<_, [u8; core::mem::size_of::<$($n)::*>()]>($($n)::* {
+                    $($inner)*
+                })
+            }
+                
         }
     }
 }

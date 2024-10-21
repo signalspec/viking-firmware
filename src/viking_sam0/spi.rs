@@ -3,8 +3,7 @@ use core::marker::PhantomData;
 use zeptos::samd::{gpio::{AlternateFunc, TypePin}, pac::sercom0::I2CM};
 use defmt::info;
 
-use viking_protocol::{protocol::spi, U32};
-use viking_protocol::AsBytes;
+use viking_protocol::{protocol::spi::{self, controller::ModeFlags}, U32};
 
 use crate::{viking::{const_bytes, take_first, take_len, ResourceMode, Writer}, viking_sam0::sercom::DynSercom};
 
@@ -15,19 +14,19 @@ pub struct SercomSPI<S, const DOPO: u8, const DIPO: u8> {
 }
 
 impl<S: Sercom, const DOPO: u8, const DIPO: u8> ResourceMode for SercomSPI<S, DOPO, DIPO> {
-    fn describe() -> &'static [u8] {
+    const PROTOCOL: u16 = spi::controller::PROTOCOL;
+    const DESCRIPTOR: &'static [u8] = {
         use spi::controller::ModeFlags;
         const_bytes!(
             spi::controller::DescribeMode {
-                protocol: viking_protocol::ConstU16::new(),
-                flags: ModeFlags::BYTE_AT_A_TIME,
-                //base_clock: U32::new(0x48_000_000 / 2),
-                //min_div: U32::new(1),
-                //max_div: U32::new(256),
-                //max_div_pow: 0,
+                flags: ModeFlags::MODE0.union(ModeFlags::MSB_FIRST),
+                base_clock: U32::new(0x48_000_000 / 2),
+                min_div: U32::new(1),
+                max_div: U32::new(256),
+                max_div_pow: 0,
             }
         )
-    }
+    };
 
     fn init(_config: &[u8]) -> Result<Self, ()> {
         info!("spi init");
@@ -57,13 +56,8 @@ impl<S: Sercom, const DOPO: u8, const DIPO: u8> ResourceMode for SercomSPI<S, DO
 pub struct SercomSCKPin<P, S, M>(PhantomData<(P, S, M)>);
 
 impl<P: TypePin, S: Sercom, M: AlternateFunc> ResourceMode for SercomSCKPin<P, S, M> {
-    fn describe() -> &'static [u8] {
-        const_bytes!(
-            spi::sck_pin::DescribeMode {
-                protocol: viking_protocol::ConstU16::new()
-            }
-        )
-    }
+    const PROTOCOL: u16 = spi::sck_pin::PROTOCOL;
+    const DESCRIPTOR: &'static [u8] = &[];
 
     fn init(config: &[u8]) -> Result<Self, ()> {
         info!("sercom SCK init {:?} {:?}", P::DYN.group, P::DYN.pin);
@@ -79,13 +73,8 @@ impl<P: TypePin, S: Sercom, M: AlternateFunc> ResourceMode for SercomSCKPin<P, S
 pub struct SercomSOPin<P, S, M>(PhantomData<(P, S, M)>);
 
 impl<P: TypePin, S, M: AlternateFunc> ResourceMode for SercomSOPin<P, S, M> {
-    fn describe() -> &'static [u8] {
-        const_bytes!(
-            spi::so_pin::DescribeMode {
-                protocol: viking_protocol::ConstU16::new()
-            }
-        )
-    }
+    const PROTOCOL: u16 = spi::so_pin::PROTOCOL;
+    const DESCRIPTOR: &'static [u8] = &[];
 
     fn init(config: &[u8]) -> Result<Self, ()> {
         info!("sercom SO init {:?} {:?}", P::DYN.group, P::DYN.pin);
@@ -101,13 +90,8 @@ impl<P: TypePin, S, M: AlternateFunc> ResourceMode for SercomSOPin<P, S, M> {
 pub struct SercomSIPin<P, S, M>(PhantomData<(P, S, M)>);
 
 impl<P: TypePin, S, M: AlternateFunc> ResourceMode for SercomSIPin<P, S, M> {
-    fn describe() -> &'static [u8] {
-        const_bytes!(
-            spi::si_pin::DescribeMode {
-                protocol: viking_protocol::ConstU16::new()
-            }
-        )
-    }
+    const PROTOCOL: u16 = spi::si_pin::PROTOCOL;
+    const DESCRIPTOR: &'static [u8] = &[];
 
     fn init(config: &[u8]) -> Result<Self, ()> {
         info!("sercom SI init {:?} {:?}", P::DYN.group, P::DYN.pin);

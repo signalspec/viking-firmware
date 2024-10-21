@@ -53,7 +53,7 @@ async fn main(rt: zeptos::Runtime, mut hw: zeptos::Hardware) {
     let viking = RefCell::new(viking_impl::State::new());
     let syst = RefCell::new(hw.syst);
 
-    hw.usb.run_device(Handler {
+    hw.usb.run_device(&mut Handler {
         rt,
         syst: unsafe { mem::transmute(&syst) },
         viking: unsafe { mem::transmute(&viking) },
@@ -83,23 +83,31 @@ impl zeptos::usb::Handler for Handler {
 
     async fn set_configuration(&self, cfg: u8, usb: &mut Endpoints) -> Result<(), ()> {
         if cfg == 1 {
-            bulk_task(self.rt).cancel();
-            evt_task(self.rt).cancel();
-
-            let ep_out = usb.bulk_out::<0x01>();
-            let ep_in = usb.bulk_in::<0x82>();
-            let ep_evt = usb.bulk_in::<0x83>();
-
-            bulk_task(self.rt).spawn(self.viking, ep_out, ep_in, self.syst);
-            evt_task(self.rt).spawn(self.viking, ep_evt);
-            Ok(())
+            self.set_interface(0, 0, usb).await
         } else {
             Err(())
         }
     }
 
-    async fn set_interface(&self, intf: u8, alt: u8, _usb: &mut Endpoints) -> Result<(), ()> {
-        if intf == 0 && alt == 0 {
+    async fn set_interface(&self, intf: u8, alt: u8, usb: &mut Endpoints) -> Result<(), ()> {
+        if intf == 0 {
+            bulk_task(self.rt).cancel();
+            evt_task(self.rt).cancel();
+
+            self.viking.borrow_mut().reset_all();
+
+            if alt == 1 {
+                info!("Enabling interface");
+                let ep_out = usb.bulk_out::<0x01>();
+                let ep_in = usb.bulk_in::<0x82>();
+                let ep_evt = usb.bulk_in::<0x83>();
+    
+                bulk_task(self.rt).spawn(self.viking, ep_out, ep_in, self.syst);
+                evt_task(self.rt).spawn(self.viking, ep_evt);
+            } else {
+                info!("Disabled interface");
+            }
+
             Ok(())
         } else {
             Err(())
@@ -113,34 +121,15 @@ impl zeptos::usb::Handler for Handler {
 
         pub const I_VIKING: u16 = INTF_VIKING as u16;
 
-        use viking_protocol::request::{CONFIGURE_MODE, DESCRIBE_MODE, LIST_MODES, LIST_RESOURCES};
+        use viking_protocol::request::{DESCRIBE_RESOURCES, CONFIGURE_MODE};
 
         match req {
             Setup { ty: Vendor, recipient: Device, request: MSOS_VENDOR_CODE, index: 0x07, data: In(data), .. } => {
                 data.respond(&MSOS_DESCRIPTOR).await
             }
 
-            Setup { ty: Vendor, recipient: Interface, index: I_VIKING, request: LIST_RESOURCES, data: In(data), .. } => {
-                data.respond(viking_impl::State::RESOURCE_NAMES.as_bytes()).await
-            }
-
-            Setup { ty: Vendor, recipient: Interface, index: I_VIKING, value, request: LIST_MODES, data: In(data), .. } => {
-                let resource = (value >> 8) as u8;
-                if let Some(modes) = viking_impl::State::mode_names(resource) {
-                    data.respond(modes.as_bytes()).await
-                } else {
-                    data.reject()
-                }
-            }
-
-            Setup { ty: Vendor, recipient: Interface, index: I_VIKING, value, request: DESCRIBE_MODE, data: In(data), .. } => {
-                let resource = (value >> 8) as u8;
-                let mode = (value & 0xff) as u8;
-                if let Some(mode) = viking_impl::State::describe(resource, mode) {
-                    data.respond(mode).await
-                } else {
-                    data.reject()
-                }
+            Setup { ty: Vendor, recipient: Interface, index: I_VIKING, request: DESCRIBE_RESOURCES, data: In(data), .. } => {
+                data.respond(viking_impl::State::DESCRIPTOR).await
             }
 
             Setup { ty: Vendor, recipient: Interface, index: I_VIKING, value, request: CONFIGURE_MODE, data: Out(data), .. } => {
@@ -149,7 +138,7 @@ impl zeptos::usb::Handler for Handler {
                 info!("configure {} {}", resource, mode);
 
                 let Ok(mut resources) = self.viking.try_borrow_mut() else {
-                    info!("busy");
+                    info!("resource busy");
                     return data.reject();
                 };
 
@@ -175,16 +164,22 @@ async fn bulk_task(viking: &'static RefCell<viking_impl::State>, mut ep_out: zep
             let len = ep_out.receive(buf_out).await;
             info!("bulk read {}: {:?}", len, &buf_out[..len]);
 
-            let mut response = Writer::new(&mut buf_in[..], 1);
+            if len < 2 {
+                continue;
+            }
+            let sync = buf_out[0];
+
+            let mut response = Writer::new(&mut buf_in[..], 2);
             
-            let status = match viking.borrow().run(&buf_out[..len], &mut response, &mut *delay.borrow_mut()).await {
+            let status = match viking.borrow().run(&buf_out[2..len], &mut response, &mut *delay.borrow_mut()).await {
                 Ok(_) => 0,
                 Err(_) => 1,
             };
             
             let response_len = response.offset();
-            buf_in[0] = status;
-            ep_in.send(buf_in, response_len, true).await;
+            buf_in[0] = sync;
+            buf_in[1] = status;
+            ep_in.send(buf_in, response_len, true).await; //todo zlp
             info!("bulk write complete");
         }
     }
@@ -267,6 +262,15 @@ static CONFIG_DESCRIPTOR: &[u8] = descriptors!{
         +Interface {
             bInterfaceNumber: INTF_VIKING,
             bAlternateSetting: 0,
+            bInterfaceClass: 0xff,
+            bInterfaceSubClass: 0,
+            bInterfaceProtocol: 0,
+            iInterface: 0,
+        }
+
+        +Interface {
+            bInterfaceNumber: INTF_VIKING,
+            bAlternateSetting: 1,
             bInterfaceClass: 0xff,
             bInterfaceSubClass: 0,
             bInterfaceProtocol: 0,

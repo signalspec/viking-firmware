@@ -3,21 +3,15 @@ use core::{cell::Cell, marker::PhantomData, task::Waker};
 use zeptos::{executor::{Interrupt, TaskOnly}, samd::gpio::{Alternate, TypePin}};
 use defmt::info;
 use viking_protocol::protocol::gpio;
-use viking_protocol::AsBytes;
 use zeptos::samd::pac::{interrupt, EIC};
 
-use crate::viking::{const_bytes, ResourceMode, Writer};
+use crate::viking::{ResourceMode, Writer};
 
 pub struct Gpio<P>(PhantomData<P>);
 
 impl<P: TypePin> ResourceMode for Gpio<P> {
-    fn describe() -> &'static [u8] {
-        const_bytes!(
-            gpio::pin::DescribeMode {
-                protocol: viking_protocol::ConstU16::new()
-            }
-        )
-    }
+    const PROTOCOL: u16 = gpio::pin::PROTOCOL;
+    const DESCRIPTOR: &'static [u8] = &[];
 
     fn init(_config: &[u8]) -> Result<Self, ()> {
         info!("gpio init {:?} {:?}", P::DYN.group, P::DYN.pin);
@@ -66,13 +60,8 @@ pub struct LevelInterrupt<P, const CH: u8>{
 }
 
 impl<P: TypePin, const CH: u8> ResourceMode for LevelInterrupt<P, CH> {
-    fn describe() -> &'static [u8] {
-        const_bytes!(
-            gpio::level_interrupt::DescribeMode {
-                protocol: viking_protocol::ConstU16::new()
-            }
-        )
-    }
+    const PROTOCOL: u16 = gpio::level_interrupt::PROTOCOL;
+    const DESCRIPTOR: &'static [u8] = &[];
 
     fn init(config: &[u8]) -> Result<Self, ()> {
         info!("level_interrupt init {:?} {:?}", P::DYN.group, P::DYN.pin);

@@ -5,7 +5,6 @@ use zeptos::samd::gpio::{ IoPin, AlternateFunc };
 use defmt::{debug, info, Format};
 
 use viking_protocol::protocol::i2c;
-use viking_protocol::AsBytes;
 
 use crate::{viking::{const_bytes, take_first, take_len, ResourceMode, Writer}, viking_sam0::sercom::{ Sercom, DynSercom }};
 
@@ -23,21 +22,21 @@ pub struct SercomI2C<S> {
 }
 
 impl<S: Sercom> ResourceMode for SercomI2C<S> {
-    fn describe() -> &'static [u8] {
+    const PROTOCOL: u16 = i2c::controller::PROTOCOL;
+    const DESCRIPTOR: &[u8] = {
         use i2c::controller::{ModeFlags, SpeedFlags};
         const_bytes!(
             i2c::controller::DescribeMode {
-                protocol: viking_protocol::ConstU16::new(),
                 flags: ModeFlags::CLOCK_STRETCH
                     .union(ModeFlags::BYTE_AT_A_TIME)
                     .union(ModeFlags::WRITE_THEN_READ)
                     .union(ModeFlags::REPEATED_START)
                     .union(ModeFlags::REPEATED_START_SAME_ADDRESS)
                     .union(ModeFlags::ZERO_LEN_WRITE),
-                speed: SpeedFlags::SPEED_STANDARD,
+                speed: SpeedFlags::STANDARD,
             }
         )
-    }
+    };
 
     fn init(config: &[u8]) -> Result<Self, ()> {
         info!("i2c init");
@@ -87,13 +86,8 @@ impl<S: Sercom> ResourceMode for SercomI2C<S> {
 pub struct SercomSCLPin<P, S, M>(PhantomData<(P, S, M)>);
 
 impl<P: TypePin, S: Sercom, M: AlternateFunc> ResourceMode for SercomSCLPin<P, S, M> {
-    fn describe() -> &'static [u8] {
-        const_bytes!(
-            i2c::scl::DescribeMode {
-                protocol: viking_protocol::ConstU16::new()
-            }
-        )
-    }
+    const PROTOCOL: u16 = i2c::scl::PROTOCOL;
+    const DESCRIPTOR: &'static [u8] = &[];
 
     fn init(config: &[u8]) -> Result<Self, ()> {
         info!("sercom SCL init {:?} {:?}", P::DYN.group, P::DYN.pin);
@@ -109,13 +103,8 @@ impl<P: TypePin, S: Sercom, M: AlternateFunc> ResourceMode for SercomSCLPin<P, S
 pub struct SercomSDAPin<P, S, M>(PhantomData<(P, S, M)>);
 
 impl<P: TypePin, S, M: AlternateFunc> ResourceMode for SercomSDAPin<P, S, M> {
-    fn describe() -> &'static [u8] {
-        const_bytes!(
-            i2c::sda::DescribeMode {
-                protocol: viking_protocol::ConstU16::new()
-            }
-        )
-    }
+    const PROTOCOL: u16 = i2c::sda::PROTOCOL;
+    const DESCRIPTOR: &'static [u8] = &[];
 
     fn init(config: &[u8]) -> Result<Self, ()> {
         info!("sercom SDA init {:?} {:?}", P::DYN.group, P::DYN.pin);
