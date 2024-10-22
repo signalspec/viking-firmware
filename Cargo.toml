@@ -1,5 +1,5 @@
 [package]
-name = "viking-sam-usb"
+name = "viking-firmware"
 version = "0.1.0"
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -13,7 +13,6 @@ features = ["critical-section-single-core", "inline-asm"]
 
 [dependencies.zeptos]
 path = "../zeptos"
-features = ["samd21", "samd-clock-48m-usb", "usb"]
 
 [dependencies.usb]
 git = "https://github.com/kevinmehall/rust-usb.git"
@@ -27,6 +26,10 @@ panic-probe = { version = "0.3" }
 pin-project-lite = "0.2.14"
 scopeguard = { version = "1.2.0", default_features = false }
 viking-protocol = { path = "../viking/viking-protocol" }
+
+[features]
+board-samd21-xplained = ["zeptos/samd21", "zeptos/samd-clock-48m-usb", "zeptos/usb"]
+board-rp2040-pico = ["zeptos/rp2040", "zeptos/rp2040-boot2-w25q080", "zeptos/usb"]
 
 [profile.dev]
 incremental = false

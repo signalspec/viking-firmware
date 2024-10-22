@@ -100,8 +100,6 @@ pub trait Resources: Sized {
 macro_rules! viking{
     (
         $mod_name:ident {
-            use {$( $use_tt:tt )*};
-
             $(
                 $resource_name:ident ($resource_id:literal) {
                     $($mode_name:ident ($mode_id:literal) : $mode_ty:ty,)*
@@ -111,7 +109,7 @@ macro_rules! viking{
     ) => {
         pub mod $mod_name {
 
-            use {$( $use_tt )*};
+            use super::*;
 
             $(
                 #[allow(non_camel_case_types)]

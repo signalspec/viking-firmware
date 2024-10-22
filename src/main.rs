@@ -1,6 +1,5 @@
 #![no_std]
 #![no_main]
-//#![allow(unused)] // TODO
 #![feature(impl_trait_in_assoc_type)]
 
 use core::cell::RefCell;
@@ -17,10 +16,16 @@ use panic_probe as _;
 use defmt_rtt as _;
 
 use defmt::info;
+use zeptos::cortex_m::SysTick;
+use zeptos::usb::descriptors::{descriptors, BinaryObjectStore, Config, DescriptorBuilder, Device, Endpoint, Interface, MicrosoftOs, MicrosoftOsCompatibleID, PlatformCapabilityMicrosoftOs, LANGUAGE_LIST_US_ENGLISH };
+use zeptos::usb::{Endpoints, In, Out, Responded, Setup, UsbBuffer};
+use zeptos::Runtime;
+use viking::{Resources, Writer};
 
 mod viking;
-mod viking_sam0;
 mod delay;
+
+mod board;
 
 static mut BULK_OUT_BUF: UsbBuffer<128> = UsbBuffer::new();
 static mut BULK_IN_BUF: UsbBuffer<128> = UsbBuffer::new();
@@ -31,26 +36,9 @@ static mut EVT_IN_BUF2: UsbBuffer<64> = UsbBuffer::new();
 async fn main(rt: zeptos::Runtime, mut hw: zeptos::Hardware) {
     info!("init");
 
-    let pm = unsafe { zeptos::samd::pac::PM::steal() };
-    let mut gclk = unsafe { zeptos::samd::pac::GCLK::steal() };
-    let eic = unsafe { zeptos::samd::pac::EIC::steal() };
+    board::init();
 
-    pm.apbcmask.write(|w| {
-        w.sercom0_().set_bit();
-        w.sercom1_().set_bit()
-    });
-
-    eic.ctrl.write(|w| w.enable().set_bit());
-
-    zeptos::samd::clock::enable_clock(&mut gclk, zeptos::samd::pac::gclk::clkctrl::IDSELECT_A::SERCOM0_CORE, zeptos::samd::pac::gclk::clkctrl::GENSELECT_A::GCLK0);
-    zeptos::samd::clock::enable_clock(&mut gclk, zeptos::samd::pac::gclk::clkctrl::IDSELECT_A::SERCOM1_CORE, zeptos::samd::pac::gclk::clkctrl::GENSELECT_A::GCLK0);
-
-    unsafe {
-        cortex_m::peripheral::NVIC::unmask(Interrupt::SERCOM0);
-        cortex_m::peripheral::NVIC::unmask(Interrupt::EIC);
-    }
-
-    let viking = RefCell::new(viking_impl::State::new());
+    let viking = RefCell::new(board::viking_impl::State::new());
     let syst = RefCell::new(hw.syst);
 
     hw.usb.run_device(&mut Handler {
@@ -63,7 +51,7 @@ async fn main(rt: zeptos::Runtime, mut hw: zeptos::Hardware) {
 struct Handler {
     rt: Runtime,
     syst: &'static RefCell<SysTick>,
-    viking: &'static RefCell<viking_impl::State>,
+    viking: &'static RefCell<board::viking_impl::State>,
 }
 
 impl zeptos::usb::Handler for Handler {
@@ -75,8 +63,8 @@ impl zeptos::usb::Handler for Handler {
             (BOS, 0) => Some(BOS_DESCRIPTOR),
             (STRING, 0) => Some(LANGUAGE_LIST_US_ENGLISH),
             (STRING, STRING_MFG) => Some(builder.string_ascii("signalspec project")),
-            (STRING, STRING_PRODUCT) => Some(builder.string_ascii("samd21 test device")),
-            (STRING, STRING_SERIAL) => Some(builder.string_hex(&zeptos::samd::serial_number())),
+            (STRING, STRING_PRODUCT) => Some(builder.string_ascii(board::PRODUCT_STRING)),
+            (STRING, STRING_SERIAL) => Some(builder.string_hex(&board::serial_number())),
             _ => None,
         }
     }
@@ -98,9 +86,9 @@ impl zeptos::usb::Handler for Handler {
 
             if alt == 1 {
                 info!("Enabling interface");
-                let ep_out = usb.bulk_out::<0x01>();
-                let ep_in = usb.bulk_in::<0x82>();
-                let ep_evt = usb.bulk_in::<0x83>();
+                let ep_out = usb.bulk_out::<EP_OUT>();
+                let ep_in = usb.bulk_in::<EP_IN>();
+                let ep_evt = usb.bulk_in::<EP_EVT>();
     
                 bulk_task(self.rt).spawn(self.viking, ep_out, ep_in, self.syst);
                 evt_task(self.rt).spawn(self.viking, ep_evt);
@@ -129,7 +117,7 @@ impl zeptos::usb::Handler for Handler {
             }
 
             Setup { ty: Vendor, recipient: Interface, index: I_VIKING, request: DESCRIBE_RESOURCES, data: In(data), .. } => {
-                data.respond(viking_impl::State::DESCRIPTOR).await
+                data.respond(board::viking_impl::State::DESCRIPTOR).await
             }
 
             Setup { ty: Vendor, recipient: Interface, index: I_VIKING, value, request: CONFIGURE_MODE, data: Out(data), .. } => {
@@ -155,7 +143,7 @@ impl zeptos::usb::Handler for Handler {
 }
 
 #[zeptos::task]
-async fn bulk_task(viking: &'static RefCell<viking_impl::State>, mut ep_out: zeptos::usb::Endpoint<Out, EP_OUT>, mut ep_in: zeptos::usb::Endpoint<In, EP_IN>, delay: &'static RefCell<SysTick>) {
+async fn bulk_task(viking: &'static RefCell<board::viking_impl::State>, mut ep_out: zeptos::usb::Endpoint<Out, EP_OUT>, mut ep_in: zeptos::usb::Endpoint<In, EP_IN>, delay: &'static RefCell<SysTick>) {
     loop {
         let buf_out = unsafe { &mut *addr_of_mut!(BULK_OUT_BUF) };
         let buf_in = unsafe { &mut *addr_of_mut!(BULK_IN_BUF) };
@@ -186,11 +174,11 @@ async fn bulk_task(viking: &'static RefCell<viking_impl::State>, mut ep_out: zep
 }
 
 #[zeptos::task]
-async fn evt_task(viking: &'static RefCell<viking_impl::State>, mut ep_evt: zeptos::usb::Endpoint<In, EP_EVT>,) {
+async fn evt_task(viking: &'static RefCell<board::viking_impl::State>, ep_evt: zeptos::usb::Endpoint<In, EP_EVT>,) {
     let ep_evt = RefCell::new(ep_evt);
     loop {
-        let mut buf_fill = unsafe { addr_of_mut!(EVT_IN_BUF1) };
-        let mut buf_send = unsafe { addr_of_mut!(EVT_IN_BUF2) };
+        let mut buf_fill = &raw mut EVT_IN_BUF1;
+        let mut buf_send = &raw mut EVT_IN_BUF2;
 
         let mut transfer = pin!(Fuse::terminated());
         let mut buf = Writer::new(unsafe { &mut (*buf_fill)[..] }, 0);
@@ -216,14 +204,6 @@ async fn evt_task(viking: &'static RefCell<viking_impl::State>, mut ep_evt: zept
         }).await;
     }
 }
-
-use zeptos::cortex_m::SysTick;
-use zeptos::samd::pac::Interrupt;
-use zeptos::usb::descriptors::{descriptors, BinaryObjectStore, Config, DescriptorBuilder, Device, Endpoint, Interface, MicrosoftOs, MicrosoftOsCompatibleID, PlatformCapabilityMicrosoftOs, LANGUAGE_LIST_US_ENGLISH };
-use zeptos::usb::{Endpoints, In, Out, Responded, Setup, UsbBuffer};
-use zeptos::Runtime;
-
-use crate::viking::{Resources, Writer};
 
 const INTF_VIKING: u8 = 0;
 
@@ -323,40 +303,3 @@ static BOS_DESCRIPTOR: &[u8] = descriptors!{
         }
     }
 };
-
-viking::viking!(
-    viking_impl {
-        use {
-            zeptos::samd::gpio::*,
-            zeptos::samd::gpio::alternate::*,
-            crate::viking_sam0,
-            crate::viking_sam0::Sercom0,
-        };
-
-        pa08(1) {
-            gpio(1): viking_sam0::Gpio<PA08>,
-            sercom0_i2c_sda(2): viking_sam0::SercomSCLPin<PA08, Sercom0, C>,
-            sercom0_spi_so(3): viking_sam0::SercomSOPin<PA08, Sercom0, C>,
-        }
-        pa09(2) {
-            gpio(1): viking_sam0::Gpio<PA09>,
-            sercom0_i2c_scl(2): viking_sam0::SercomSDAPin<PA09, Sercom0, C>,
-            sercom0_spi_sck(3): viking_sam0::SercomSCKPin<PA09, Sercom0, C>,
-        }
-        pa10(3) {
-            gpio(1): viking_sam0::Gpio<PA10>,
-            sercom0_spi_si(2): viking_sam0::SercomSIPin<PA10, Sercom0, C>,
-        }
-        pa11(4) {
-            gpio(1): viking_sam0::Gpio<PA11>,
-            level_interrupt(2): viking_sam0::LevelInterrupt<PA11, 11>,
-        }
-        pb30(5) {
-            gpio(1): viking_sam0::Gpio<PB30>,
-        }
-        sercom0(6) {
-            i2c(1): viking_sam0::SercomI2C<Sercom0>,
-            spi(2): viking_sam0::SercomSPI<Sercom0, 0, 2>,
-        }
-    }
-);

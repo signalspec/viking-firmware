@@ -3,11 +3,10 @@ use core::marker::PhantomData;
 use zeptos::samd::{gpio::{AlternateFunc, TypePin}, pac::sercom0::I2CM};
 use defmt::info;
 
-use viking_protocol::{protocol::spi::{self, controller::ModeFlags}, U32};
+use viking_protocol::{protocol::spi, U32};
 
-use crate::{viking::{const_bytes, take_first, take_len, ResourceMode, Writer}, viking_sam0::sercom::DynSercom};
-
-use super::sercom::Sercom;
+use crate::viking::{const_bytes, take_first, ResourceMode, Writer};
+use super::sercom::{ DynSercom, Sercom };
 
 pub struct SercomSPI<S, const DOPO: u8, const DIPO: u8> {
     _p: PhantomData<S>,
@@ -59,7 +58,7 @@ impl<P: TypePin, S: Sercom, M: AlternateFunc> ResourceMode for SercomSCKPin<P, S
     const PROTOCOL: u16 = spi::sck_pin::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
-    fn init(config: &[u8]) -> Result<Self, ()> {
+    fn init(_config: &[u8]) -> Result<Self, ()> {
         info!("sercom SCK init {:?} {:?}", P::DYN.group, P::DYN.pin);
         P::set_alternate(M::DYN);
         Ok(Self(PhantomData))
@@ -76,7 +75,7 @@ impl<P: TypePin, S, M: AlternateFunc> ResourceMode for SercomSOPin<P, S, M> {
     const PROTOCOL: u16 = spi::so_pin::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
-    fn init(config: &[u8]) -> Result<Self, ()> {
+    fn init(_config: &[u8]) -> Result<Self, ()> {
         info!("sercom SO init {:?} {:?}", P::DYN.group, P::DYN.pin);
         P::set_alternate(M::DYN);
         Ok(Self(PhantomData))
@@ -93,7 +92,7 @@ impl<P: TypePin, S, M: AlternateFunc> ResourceMode for SercomSIPin<P, S, M> {
     const PROTOCOL: u16 = spi::si_pin::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
-    fn init(config: &[u8]) -> Result<Self, ()> {
+    fn init(_config: &[u8]) -> Result<Self, ()> {
         info!("sercom SI init {:?} {:?}", P::DYN.group, P::DYN.pin);
         P::set_alternate(M::DYN);
         Ok(Self(PhantomData))
@@ -134,7 +133,7 @@ async fn transfer(sercom: DynSercom, request: &mut &[u8], response: &mut Writer<
 
     let len = take_first(request).ok_or(())? as u8;
 
-    for i in 0..len {
+    for _ in 0..len {
         let so_byte = take_first(request).ok_or(())?;
         regs.data.write(|w| w.data().variant(so_byte as u16));
 
