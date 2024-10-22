@@ -1,12 +1,13 @@
 use core::{cell::Cell, marker::PhantomData};
 
-use zeptos::samd::{gpio::TypePin, pac::{interrupt, sercom0::{self, RegisterBlock, I2CM}, Interrupt, SERCOM0, SERCOM1}};
-use zeptos::samd::gpio::{ IoPin, AlternateFunc };
+use zeptos::samd::{gpio::TypePin, pac::sercom0::I2CM};
+use zeptos::samd::gpio:: AlternateFunc ;
 use defmt::{debug, info, Format};
 
 use viking_protocol::protocol::i2c;
 
-use crate::{viking::{const_bytes, take_first, take_len, ResourceMode, Writer}, viking_sam0::sercom::{ Sercom, DynSercom }};
+use crate::viking::{const_bytes, take_first, take_len, ResourceMode, Writer};
+use super::sercom::{ Sercom, DynSercom };
 
 #[derive(Clone, Copy, Debug, PartialEq, Format)]
 enum State {
@@ -59,7 +60,7 @@ impl<S: Sercom> ResourceMode for SercomI2C<S> {
                 debug!("i2c start {:x} {:?}", addr, self.state.get());
                 let res = start(sercom, addr, &self.state).await;
                 debug!("i2c start -> {} {:?}", res, self.state.get());
-                response.put(res);
+                response.put(res)?;
                 Ok(())
             }
             cmd::STOP => {
@@ -89,7 +90,7 @@ impl<P: TypePin, S: Sercom, M: AlternateFunc> ResourceMode for SercomSCLPin<P, S
     const PROTOCOL: u16 = i2c::scl::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
-    fn init(config: &[u8]) -> Result<Self, ()> {
+    fn init(_config: &[u8]) -> Result<Self, ()> {
         info!("sercom SCL init {:?} {:?}", P::DYN.group, P::DYN.pin);
         P::set_alternate(M::DYN);
         Ok(Self(PhantomData))
@@ -106,7 +107,7 @@ impl<P: TypePin, S, M: AlternateFunc> ResourceMode for SercomSDAPin<P, S, M> {
     const PROTOCOL: u16 = i2c::sda::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
-    fn init(config: &[u8]) -> Result<Self, ()> {
+    fn init(_config: &[u8]) -> Result<Self, ()> {
         info!("sercom SDA init {:?} {:?}", P::DYN.group, P::DYN.pin);
         P::set_alternate(M::DYN);
         Ok(Self(PhantomData))
@@ -214,7 +215,7 @@ async fn write(sercom: DynSercom, data: &[u8], state: &Cell<State>) -> Result<()
 async fn read(sercom: DynSercom, n: u8, writer: &mut Writer<'_>, state: &Cell<State>) -> Result<(), ()> {
     let regs = sercom.regs().i2cm();
 
-    for i in 0..n {
+    for _ in 0..n {
         if state.get() == State::Read {
             // Ack previous byte, read the next
             regs.ctrlb.write(|w| w.cmd().variant(0x02));

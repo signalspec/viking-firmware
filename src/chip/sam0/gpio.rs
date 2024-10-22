@@ -25,7 +25,7 @@ impl<P: TypePin> ResourceMode for Gpio<P> {
         P::dirclr();
     }
 
-    async fn command(&self, command: u8, buf: &mut &[u8], response: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&self, command: u8, _buf: &mut &[u8], response: &mut Writer<'_>) -> Result<(), ()> {
         use viking_protocol::protocol::gpio::pin::cmd;
         
         match command {
@@ -63,7 +63,7 @@ impl<P: TypePin, const CH: u8> ResourceMode for LevelInterrupt<P, CH> {
     const PROTOCOL: u16 = gpio::level_interrupt::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
-    fn init(config: &[u8]) -> Result<Self, ()> {
+    fn init(_config: &[u8]) -> Result<Self, ()> {
         info!("level_interrupt init {:?} {:?}", P::DYN.group, P::DYN.pin);
         P::set_alternate(Alternate::A);
         Ok(LevelInterrupt { _p: PhantomData, event: Cell::new(None) })
@@ -74,7 +74,7 @@ impl<P: TypePin, const CH: u8> ResourceMode for LevelInterrupt<P, CH> {
         P::set_io();
     }
 
-    async fn command(&self, command: u8, buf: &mut &[u8], response: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&self, command: u8, _buf: &mut &[u8], _response: &mut Writer<'_>) -> Result<(), ()> {
         use viking_protocol::protocol::gpio::level_interrupt::cmd;
         
         let (sense, event) = match command {

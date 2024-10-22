@@ -10,7 +10,7 @@ pub struct Writer<'a> {
 }
 
 impl<'a> Writer<'a> {
-    pub fn new(buf: &'a mut [u8], offset: usize) -> Writer {
+    pub fn new(buf: &'a mut [u8], offset: usize) -> Writer<'a> {
         Writer { buf, offset }
     }
 
@@ -34,11 +34,11 @@ pub trait ResourceMode: Sized {
 
     fn deinit(self);
 
-    async fn command(&self, cmd: u8, buf: &mut &[u8], res: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&self, _cmd: u8, _buf: &mut &[u8], _res: &mut Writer<'_>) -> Result<(), ()> {
         Err(())
     }
 
-    fn poll_event(&self, waker: &Waker, resource: u8, buf: &mut Writer<'_>) {}
+    fn poll_event(&self, _waker: &Waker, _resource: u8, _buf: &mut Writer<'_>) {}
 }
 
 
@@ -73,7 +73,7 @@ pub trait Resources: Sized {
                 DELAY => {
                     let mut us: u32 = 0;
                     loop {
-                        let mut b = take_first(&mut request).ok_or(())?;
+                        let b = take_first(&mut request).ok_or(())?;
                         us = (us << 7) | (b & ((1<<7) - 1)) as u32;
                         if us > D::MAX {
                             info!("Delay too long");
