@@ -220,7 +220,7 @@ const EP_EVT: u8 = 0x83;
 static DEVICE_DESCRIPTOR: &[u8] = descriptors! {
     Device {
         bcdUSB: 0x0201,
-        bDeviceClass: usb::class_code::VENDOR_SPECIFIC,
+        bDeviceClass: usb::class_code::DEVICE,
         bDeviceSubClass: 0x00,
         bDeviceProtocol: 0x00,
         bMaxPacketSize0: 64,
