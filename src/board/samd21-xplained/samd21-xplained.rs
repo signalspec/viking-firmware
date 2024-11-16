@@ -30,30 +30,30 @@ pub fn init() {
 
 crate::viking::viking!(
     viking_impl {
-        pa08(1) {
-            gpio(1): sam0::Gpio<PA08>,
-            sercom0_i2c_sda(2): sam0::SercomSCLPin<PA08, Sercom0, C>,
-            sercom0_spi_so(3): sam0::SercomSOPin<PA08, Sercom0, C>,
+        pa08 {
+            gpio: sam0::Gpio<PA08>,
+            sercom0_i2c_sda: sam0::SercomSCLPin<PA08, Sercom0, C>,
+            sercom0_spi_so: sam0::SercomSOPin<PA08, Sercom0, C>,
         }
-        pa09(2) {
-            gpio(1): sam0::Gpio<PA09>,
-            sercom0_i2c_scl(2): sam0::SercomSDAPin<PA09, Sercom0, C>,
-            sercom0_spi_sck(3): sam0::SercomSCKPin<PA09, Sercom0, C>,
+        pa09 {
+            gpio: sam0::Gpio<PA09>,
+            sercom0_i2c_scl: sam0::SercomSDAPin<PA09, Sercom0, C>,
+            sercom0_spi_sck: sam0::SercomSCKPin<PA09, Sercom0, C>,
         }
-        pa10(3) {
-            gpio(1): sam0::Gpio<PA10>,
-            sercom0_spi_si(2): sam0::SercomSIPin<PA10, Sercom0, C>,
+        pa10 {
+            gpio: sam0::Gpio<PA10>,
+            sercom0_spi_si: sam0::SercomSIPin<PA10, Sercom0, C>,
         }
-        pa11(4) {
-            gpio(1): sam0::Gpio<PA11>,
-            level_interrupt(2): sam0::LevelInterrupt<PA11, 11>,
+        pa11 {
+            gpio: sam0::Gpio<PA11>,
+            level_interrupt: sam0::LevelInterrupt<PA11, 11>,
         }
-        pb30(5) {
-            gpio(1): sam0::Gpio<PB30>,
+        pb30 {
+            gpio: sam0::Gpio<PB30>,
         }
-        sercom0(6) {
-            i2c(1): sam0::SercomI2C<Sercom0>,
-            spi(2): sam0::SercomSPI<Sercom0, 0, 2>,
+        sercom0 {
+            i2c: sam0::SercomI2C<Sercom0>,
+            spi: sam0::SercomSPI<Sercom0, 0, 2>,
         }
     }
 );

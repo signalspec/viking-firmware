@@ -1,6 +1,8 @@
 #![no_std]
 #![no_main]
 #![feature(impl_trait_in_assoc_type)]
+#![feature(macro_metavar_expr)]
+#![feature(inline_const_pat)]
 
 use core::cell::RefCell;
 use core::convert::Infallible;

@@ -101,8 +101,8 @@ macro_rules! viking{
     (
         $mod_name:ident {
             $(
-                $resource_name:ident ($resource_id:literal) {
-                    $($mode_name:ident ($mode_id:literal) : $mode_ty:ty,)*
+                $resource_name:ident {
+                    $($mode_name:ident : $mode_ty:ty,)*
                 }
             )*
         }
@@ -214,10 +214,10 @@ macro_rules! viking{
                 fn configure(&mut self, resource: u8, mode: u8, config: &[u8]) -> Result<(), ()> {
                     match resource {
                         $(
-                            $resource_id => {
+                            const { ${index()} + 1 } => {
                                 if let Some(r) = self.$resource_name.take() { r.deinit() }
                                 self.$resource_name = Some(match mode {
-                                    $($mode_id => $resource_name::$mode_name(<$mode_ty as $crate::viking::ResourceMode>::init(config)?),)*
+                                    $(const { ${index()} + 1 } => $resource_name::$mode_name(<$mode_ty as $crate::viking::ResourceMode>::init(config)?),)*
                                     _ => return Err(())
                                 });
                                 Ok(())
@@ -237,7 +237,7 @@ macro_rules! viking{
                     use $crate::viking::ResourceMode;
                     match resource {
                         $(
-                            $resource_id => match &self.$resource_name {
+                            const { ${index()} + 1 } => match &self.$resource_name {
                                 $(Some($resource_name::$mode_name(s)) => s.command(command, buf, response).await,)*
                                 _ => Err(())
                             }
@@ -250,7 +250,7 @@ macro_rules! viking{
                     use $crate::viking::ResourceMode;
                     $(
                         match &self.$resource_name {
-                            $(Some($resource_name::$mode_name(s)) => s.poll_event(waker, $resource_id, buf),)*
+                            $(Some($resource_name::$mode_name(s)) => s.poll_event(waker, ${index()} + 1, buf),)*
                             _ => {}
                         }
                     )*
