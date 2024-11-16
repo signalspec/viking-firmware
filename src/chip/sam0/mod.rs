@@ -1,5 +1,5 @@
 mod sercom;
-pub use sercom::Sercom0;
+pub use sercom::{ Sercom0, Sercom1, Sercom2 };
 
 mod gpio;
 pub use gpio::{Gpio, LevelInterrupt};

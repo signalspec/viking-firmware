@@ -29,6 +29,7 @@ viking-protocol = { path = "../viking/viking-protocol" }
 
 [features]
 board-samd21-xplained = ["zeptos/samd21", "zeptos/samd-clock-48m-usb", "zeptos/usb"]
+board-samd11-seahorse = ["zeptos/samd11", "zeptos/samd-clock-48m-usb", "zeptos/usb"]
 board-rp2040-pico = ["zeptos/rp2040", "zeptos/rp2040-boot2-w25q080", "zeptos/usb"]
 
 [profile.dev]
