@@ -14,10 +14,6 @@ features = ["critical-section-single-core", "inline-asm"]
 [dependencies.zeptos]
 path = "../zeptos"
 
-[dependencies.usb]
-git = "https://github.com/kevinmehall/rust-usb.git"
-rev = "cb0599102313de79d34d4be4bb37f2c25e480ba6"
-
 [dependencies]
 defmt = "0.3.6"
 defmt-rtt = "0.4.0"
@@ -26,6 +22,7 @@ panic-probe = { version = "0.3" }
 pin-project-lite = "0.2.14"
 scopeguard = { version = "1.2.0", default_features = false }
 viking-protocol = { path = "../viking/viking-protocol" }
+usb = "0.3"
 
 [features]
 board-samd21-xplained = ["zeptos/samd21", "zeptos/samd-clock-48m-usb", "zeptos/usb"]

@@ -342,9 +342,9 @@ dependencies = [
 
 [[package]]
 name = "rp-pac"
-version = "6.0.0"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f30f6c4c846269293db805e9c77864ff7b923395b480550df44f0868e3765337"
+checksum = "8af65855c40b2c35079514c5489abffc0429347fef25d8467ff98ad84b4322d3"
 dependencies = [
  "cortex-m",
  "cortex-m-rt",
@@ -446,7 +446,8 @@ checksum = "3354b9ac3fae1ff6755cb6db53683adb661634f67557942dea4facebec0fee4b"
 [[package]]
 name = "usb"
 version = "0.3.0"
-source = "git+https://github.com/kevinmehall/rust-usb.git?rev=cb0599102313de79d34d4be4bb37f2c25e480ba6#cb0599102313de79d34d4be4bb37f2c25e480ba6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1351842cf47c13bf2169636357eea4ebf831dc29485fbe64963583b8e74b59a9"
 
 [[package]]
 name = "vcell"
@@ -529,18 +530,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.6"
+version = "0.8.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a65238aacd5fb83fb03fcaf94823e71643e937000ec03c46e7da94234b10c870"
+checksum = "2586fea28e186957ef732a5f8b3be2da217d65c5969d4b1e17f973ebbe876879"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.6"
+version = "0.8.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ca22c4ad176b37bd81a565f66635bde3d654fe6832730c3e52e1018ae1655ee"
+checksum = "a996a8f63c5c4448cd959ac1bab0aaa3306ccfd060472f85943ee0750f0169be"
 dependencies = [
  "proc-macro2",
  "quote",

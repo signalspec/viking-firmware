@@ -69,14 +69,14 @@ impl<P: TypePin, S: Sercom, M: AlternateFunc> ResourceMode for SercomSCKPin<P, S
     }
 }
 
-pub struct SercomSOPin<P, S, M>(PhantomData<(P, S, M)>);
+pub struct SercomSDOPin<P, S, M>(PhantomData<(P, S, M)>);
 
-impl<P: TypePin, S, M: AlternateFunc> ResourceMode for SercomSOPin<P, S, M> {
-    const PROTOCOL: u16 = spi::so_pin::PROTOCOL;
+impl<P: TypePin, S, M: AlternateFunc> ResourceMode for SercomSDOPin<P, S, M> {
+    const PROTOCOL: u16 = spi::sdo_pin::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
     fn init(_config: &[u8]) -> Result<Self, ()> {
-        info!("sercom SO init {:?} {:?}", P::DYN.group, P::DYN.pin);
+        info!("sercom SDO init {:?} {:?}", P::DYN.group, P::DYN.pin);
         P::set_alternate(M::DYN);
         Ok(Self(PhantomData))
     }
@@ -86,14 +86,14 @@ impl<P: TypePin, S, M: AlternateFunc> ResourceMode for SercomSOPin<P, S, M> {
     }
 }
 
-pub struct SercomSIPin<P, S, M>(PhantomData<(P, S, M)>);
+pub struct SercomSDIPin<P, S, M>(PhantomData<(P, S, M)>);
 
-impl<P: TypePin, S, M: AlternateFunc> ResourceMode for SercomSIPin<P, S, M> {
-    const PROTOCOL: u16 = spi::si_pin::PROTOCOL;
+impl<P: TypePin, S, M: AlternateFunc> ResourceMode for SercomSDIPin<P, S, M> {
+    const PROTOCOL: u16 = spi::sdi_pin::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
     fn init(_config: &[u8]) -> Result<Self, ()> {
-        info!("sercom SI init {:?} {:?}", P::DYN.group, P::DYN.pin);
+        info!("sercom SDI init {:?} {:?}", P::DYN.group, P::DYN.pin);
         P::set_alternate(M::DYN);
         Ok(Self(PhantomData))
     }
@@ -148,5 +148,26 @@ async fn transfer(sercom: DynSercom, request: &mut &[u8], response: &mut Writer<
 
     Ok(())
 }
+
+async fn read(sercom: DynSercom, request: &mut &[u8], response: &mut Writer<'_>) -> Result<(), ()> {
+    let regs = sercom.regs().spi();
+
+    let len = take_first(request).ok_or(())? as u8;
+
+    for _ in 0..len {
+        regs.data.write(|w| w.data().variant(0));
+
+        regs.intenset.write(|w| { w.txc().set_bit() });
+        sercom.notify().until(|| {
+            regs.intflag.read().txc().bit_is_set()
+        }).await;
+
+        let si_byte = regs.data.read().data().bits() as u8;
+        response.put(si_byte)?;
+    }
+
+    Ok(())
+}
+
 
 

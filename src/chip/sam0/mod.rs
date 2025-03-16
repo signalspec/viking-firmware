@@ -8,4 +8,4 @@ mod i2c;
 pub use i2c::{SercomI2C, SercomSCLPin, SercomSDAPin};
 
 mod spi;
-pub use spi::{SercomSPI, SercomSCKPin, SercomSOPin, SercomSIPin};
+pub use spi::{SercomSPI, SercomSCKPin, SercomSDOPin, SercomSDIPin};
