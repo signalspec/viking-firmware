@@ -1,10 +1,11 @@
 use core::{cell::Cell, marker::PhantomData, task::Waker};
 
-use zeptos::{executor::{Interrupt, TaskOnly}, rp::gpio::*, rp::pac::interrupt};
+use zeptos::{executor::{Interrupt, TaskOnly}, samd::gpio::{Alternate, TypePin}};
 use defmt::info;
 use viking_protocol::protocol::{gpio, led};
+use zeptos::samd::pac::{interrupt, EIC};
 
-use crate::viking::{ResourceMode, Writer};
+use crate::{ResourceMode, Writer};
 
 pub struct Gpio<P>(PhantomData<P>);
 
@@ -13,15 +14,15 @@ impl<P: TypePin> ResourceMode for Gpio<P> {
     const DESCRIPTOR: &'static [u8] = &[];
 
     fn init(_config: &[u8]) -> Result<Self, ()> {
-        info!("gpio{} init", P::DYN.pin);
-        P::set_function(Function::F5);
+        info!("gpio init {:?} {:?}", P::DYN.group, P::DYN.pin);
+        P::pincfg().write(|w| w.inen().set_bit());
+        P::enable_sampling();
         Ok(Gpio(PhantomData))
     }
 
     fn deinit(self) {
-        info!("gpio{} deinit", P::DYN.pin);
-        P::oe_clr();
-        P::disable();
+        info!("gpio deinit");
+        P::dirclr();
     }
 
     async fn command(&self, command: u8, _buf: &mut &[u8], response: &mut Writer<'_>) -> Result<(), ()> {
@@ -29,7 +30,7 @@ impl<P: TypePin> ResourceMode for Gpio<P> {
         
         match command {
             cmd::FLOAT => {
-                P::oe_clr();
+                P::dirclr();
                 Ok(())
             }
             cmd::READ => {
@@ -38,13 +39,13 @@ impl<P: TypePin> ResourceMode for Gpio<P> {
                 Ok(())
             }
             cmd::LOW => {
-                P::out_clr();
-                P::oe_set();
+                P::outclr();
+                P::dirset();
                 Ok(())
             }
             cmd::HIGH => {
-                P::out_set();
-                P::oe_set();
+                P::outset();
+                P::dirset();
                 Ok(())
             }
             _ => Err(())
@@ -52,7 +53,7 @@ impl<P: TypePin> ResourceMode for Gpio<P> {
     }
 }
 
-/* 
+
 pub struct LevelInterrupt<P, const CH: u8>{
     _p: PhantomData<P>,
     event: Cell<Option<bool>>,
@@ -63,14 +64,14 @@ impl<P: TypePin, const CH: u8> ResourceMode for LevelInterrupt<P, CH> {
     const DESCRIPTOR: &'static [u8] = &[];
 
     fn init(_config: &[u8]) -> Result<Self, ()> {
-        info!("level_interrupt init {}", P::DYN.pin);
-        P::set_function(Function::F5);
+        info!("level_interrupt init {:?} {:?}", P::DYN.group, P::DYN.pin);
+        P::set_alternate(Alternate::A);
         Ok(LevelInterrupt { _p: PhantomData, event: Cell::new(None) })
     }
 
     fn deinit(self) {
         info!("level_interrupt deinit");
-        P::disable();
+        P::set_io();
     }
 
     async fn command(&self, command: u8, _buf: &mut &[u8], _response: &mut Writer<'_>) -> Result<(), ()> {
@@ -110,7 +111,7 @@ impl<P: TypePin, const CH: u8> ResourceMode for LevelInterrupt<P, CH> {
     }
 }
 
-type Sense = zeptos::rp::pac::io::Int;
+type Sense = zeptos::samd::pac::eic::config::SENSE0SELECT_A;
 
 fn configure_interrupt(ch: u8, sense: Sense) {
     let eic = unsafe { EIC::steal() };
@@ -142,15 +143,13 @@ async fn wait_interrupt(ch: u8) {
         eic.intflag.read().bits() & (1<<ch) != 0
     }).await;
 }
-
 static INT: TaskOnly<Interrupt> = unsafe { TaskOnly::new(Interrupt::new()) };
 
 #[interrupt]
-fn IO_IRQ_BANK0() {
+fn EIC() {
+    let eic = unsafe { EIC::steal() };
     unsafe { INT.get_unchecked().notify(); }
 }
-
-*/
 
 pub struct Led<P, const ACTIVE: bool, const COLOR: u8>(PhantomData<P>);
 
@@ -159,38 +158,38 @@ impl<P: TypePin, const ACTIVE: bool, const COLOR: u8> ResourceMode for Led<P, {A
     const DESCRIPTOR: &'static [u8] = &[COLOR];
 
     fn init(_config: &[u8]) -> Result<Self, ()> {
-        P::set_function(Function::F5);
+        info!("led init {:?} {:?}", P::DYN.group, P::DYN.pin);
         if ACTIVE {
-            P::out_set();
+            P::outset();
         } else {
-            P::out_clr();
+            P::outclr();
         }
-        P::oe_set();
+        P::dirset();
         Ok(Led(PhantomData))
     }
 
     fn deinit(self) {
-        P::oe_clr();
-        P::disable();
+        P::dirclr();
+        info!("led deinit");
     }
 
-    async fn command(&self, command: u8, _buf: &mut &[u8], _response: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&self, command: u8, _buf: &mut &[u8], response: &mut Writer<'_>) -> Result<(), ()> {
         use viking_protocol::protocol::led::binary::cmd;
         
         match command {
             cmd::OFF => {
                 if ACTIVE {
-                    P::out_clr();
+                    P::outclr();
                 } else {
-                    P::out_set();
+                    P::outset();
                 }
                 Ok(())
             }
             cmd::ON => {
                 if ACTIVE {
-                    P::out_set();
+                    P::outset();
                 } else {
-                    P::out_clr();
+                    P::outclr();
                 }
                 Ok(())
             }

@@ -1,175 +1,208 @@
-#[path = "../../chip/rp/mod.rs"]
-mod rp;
+#![no_std]
+#![no_main]
+#![feature(impl_trait_in_assoc_type)]
+#![feature(macro_metavar_expr)]
+#![feature(inline_const_pat)]
 
-use rp::{Gpio, Led};
+use viking_firmware_common::rp::{Gpio, Led, Platform};
 use zeptos::rp::gpio::*;
+use defmt::info;
 
-pub const PRODUCT_STRING: &'static str = "RP2040 Pico";
-
-pub fn serial_number() -> [u8; 8] {
-    zeptos::rp::serial_number()
+#[zeptos::main]
+async fn main(rt: zeptos::Runtime, hw: zeptos::Hardware) {
+    info!("init");
+    let (usb, systick, platform) = Platform::new(rt, hw);
+    viking_impl::run(usb, systick, platform).await;
 }
 
-pub fn init() {
+viking_firmware_common::viking!(
+    viking_impl<Platform> {
+        const PRODUCT_STRING: &'static str = "RP2040 Pico";
+        const CMD_BUF_SIZE: usize = 64 * 1024;
+        const RES_BUF_SIZE: usize = 64 * 1024;
+        const EVT_BUF_SIZE: usize = 64 * 1024;
 
-}
-
-crate::viking::viking!(
-    viking_impl {
-        gp0 {
+        resource gp0 {
             gpio: Gpio<GPIO00>,
             // spi0_rx
             // i2c0_sda
             // uart0_tx
         }
-        gp1 {
+        
+        resource gp1 {
             gpio: Gpio<GPIO01>,
             // i2c0_scl
             // uart0_rx
         }
-        gp2 {
+        
+        resource gp2 {
             gpio: Gpio<GPIO02>,
             // spi0_sck
             // i2c1_sda
         }
-        gp3 {
+        
+        resource gp3 {
             gpio: Gpio<GPIO03>,
             // spi0_tx
             // i2c1_scl
         }
-        gp4 {
+        
+        resource gp4 {
             gpio: Gpio<GPIO04>,
             // spi0_rx
             // i2c0_sda
             // uart1_tx
         }
-        gp5 {
+        
+        resource gp5 {
             gpio: Gpio<GPIO05>,
             // i2c0_scl
             // uart1_rx
         }
-        gp6 {
+        
+        resource gp6 {
             gpio: Gpio<GPIO06>,
             // spi0_sck
             // i2c1_sda
         }
-        gp7 {
+        
+        resource gp7 {
             gpio: Gpio<GPIO07>,
             // spi0_tx
             // i2c1_scl
         }
-        gp8 {
+        
+        resource gp8 {
             gpio: Gpio<GPIO08>,
             // spi1_rx
             // i2c0_sda
             // uart1_tx
         }
-        gp9 {
+        
+        resource gp9 {
             gpio: Gpio<GPIO09>,
             // i2c0_scl
             // uart1_rx
         }
-        gp10 {
+        
+        resource gp10 {
             gpio: Gpio<GPIO10>,
             // spi1_sck
             // i2c1_sda
         }
-        gp11 {
+        
+        resource gp11 {
             gpio: Gpio<GPIO11>,
             // spi1_tx
             // i2c1_scl
         }
-        gp12 {
+        
+        resource gp12 {
             gpio: Gpio<GPIO12>,
             // spi1_rx
             // i2c0_sda
             // uart0_tx
         }
-        gp13 {
+        
+        resource gp13 {
             gpio: Gpio<GPIO13>,
             // i2c0_scl
             // uart0_rx
         }
-        gp14 {
+        
+        resource gp14 {
             gpio: Gpio<GPIO14>,
             // spi1_sck
             // i2c1_sda
         }
-        gp15 {
+        
+        resource gp15 {
             gpio: Gpio<GPIO15>,
             // spi1_tx
             // i2c1_scl
         }
-
-        gp16 {
+        
+        resource gp16 {
             gpio: Gpio<GPIO16>,
             // spi0_rx
             // i2c0_sda
             // uart0_tx
         }
-        gp17 {
+        
+        resource gp17 {
             gpio: Gpio<GPIO17>,
             // i2c0_scl
             // uart0_rx
         }
-        gp18 {
+        
+        resource gp18 {
             gpio: Gpio<GPIO18>,
             // spi0_sck
             // i2c1_sda
         }
-        gp19 {
+        
+        resource gp19 {
             gpio: Gpio<GPIO19>,
             // spi0_tx
             // i2c1_scl
         }
-        gp20 {
+        
+        resource gp20 {
             gpio: Gpio<GPIO20>,
             // i2c0_sda
         }
-        gp21 {
+        
+        resource gp21 {
             gpio: Gpio<GPIO21>,
             // i2c0_scl
         }
-        gp22 {
+        
+        resource gp22 {
             gpio: Gpio<GPIO22>,
         }
-        gp26 {
+        
+        resource gp26 {
             gpio: Gpio<GPIO26>,
             // adc0
             // i2c1_sda
         }
-        gp27 {
+        
+        resource gp27 {
             gpio: Gpio<GPIO27>,
             // adc1
             // i2c1_scl
         }
-        gp28 {
+        
+        resource gp28 {
             gpio: Gpio<GPIO28>,
             // adc2
         }
 
-        led {
+        resource led {
             led: Led<GPIO25, true, { viking_protocol::protocol::led::binary::color::GREEN }>,
         }
 
-        spi0 {
+        resource spi0 {
 
         }
-        spi1 {
-
-        }
-
-        i2c0 {
-
-        }
-        i2c1 {
+        
+        resource spi1 {
 
         }
 
-        uart0 {
+        resource i2c0 {
 
         }
-        uart1 {
+        
+        resource i2c1 {
+
+        }
+
+        resource uart0 {
+
+        }
+
+        resource uart1 {
 
         }
     }

@@ -1,13 +1,14 @@
-#[path = "../../chip/sam0/mod.rs"]
-mod sam0;
+#![no_std]
+#![no_main]
+#![feature(impl_trait_in_assoc_type)]
+#![feature(macro_metavar_expr)]
+#![feature(inline_const_pat)]
 
-use sam0::{Sercom0, Sercom1 };
+use viking_firmware_common::sam0::{ self, Sercom0, Sercom1, Platform };
 use zeptos::samd::{gpio::{alternate::*, *}, pac::Interrupt};
 
-pub const PRODUCT_STRING: &'static str = "Seahorse";
-pub use zeptos::samd::serial_number;
-
-pub fn init() {
+#[zeptos::main]
+async fn main(rt: zeptos::Runtime, hw: zeptos::Hardware) {
     let pm = unsafe { zeptos::samd::pac::PM::steal() };
     let mut gclk = unsafe { zeptos::samd::pac::GCLK::steal() };
     let eic = unsafe { zeptos::samd::pac::EIC::steal() };
@@ -37,31 +38,39 @@ pub fn init() {
     PA22::set_alternate(Alternate::C); // SDA
     PA23::set_alternate(Alternate::C); // SCL
 
+    let (usb, systick, platform) = Platform::new(rt, hw);
+    viking_impl::run(usb, systick, platform).await;
 }
 
-crate::viking::viking!(
-    viking_impl {
-        led {
+viking_firmware_common::viking!(
+    viking_impl<Platform> {
+        const PRODUCT_STRING: &'static str = "Seahorse";
+        const CMD_BUF_SIZE: usize = 640;
+        const RES_BUF_SIZE: usize = 640;
+        const EVT_BUF_SIZE: usize = 256;
+
+        resource led {
             led: sam0::Led<PA03, false, { viking_protocol::protocol::led::binary::color::RED }>,
         }
-        ce {
+        
+        resource ce {
             gpio: sam0::Gpio<PA02>,
         }
 
-        cs {
+        resource cs {
             gpio: sam0::Gpio<PA06>,
         }
 
-        irq {
+        resource irq {
             gpio: sam0::Gpio<PA16>,
             level_interrupt: sam0::LevelInterrupt<PA16, 0>,
         }
 
-        spi {
+        resource spi {
             spi: sam0::SercomSPI<Sercom0, 2, 2>,
         }
 
-        i2c {
+        resource i2c {
             i2c: sam0::SercomI2C<Sercom1>,
         }
     }

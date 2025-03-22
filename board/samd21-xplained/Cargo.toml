@@ -1,0 +1,23 @@
+[package]
+name = "viking-firmware-samd21-xplained"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+edition = "2024"
+
+[dependencies]
+cortex-m-rt = { workspace = true }
+cortex-m = { workspace = true, features = ["critical-section-single-core", "inline-asm"] }
+defmt = { workspace = true }
+defmt-rtt = { workspace = true }
+futures-util = { workspace = true, default-features = false, features = ["async-await", "async-await-macro"] }
+panic-probe = { workspace = true }
+pin-project-lite = { workspace = true }
+scopeguard = { workspace = true, default_features = false }
+viking-protocol = { workspace = true }
+usb = { workspace = true }
+zeptos = { workspace = true, features = ["samd21", "usb", "samd-clock-48m-usb"] }
+viking-firmware-common = { workspace = true, features = ["samd21"] }
+
+[[bin]]
+name = "viking-firmware-samd21-xplained"
+path = "main.rs"

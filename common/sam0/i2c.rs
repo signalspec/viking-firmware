@@ -6,7 +6,7 @@ use defmt::{debug, info, Format};
 
 use viking_protocol::protocol::i2c;
 
-use crate::viking::{const_bytes, take_first, take_len, ResourceMode, Writer};
+use crate::{const_bytes, take_first, take_len, ResourceMode, Writer};
 use super::sercom::{ Sercom, DynSercom };
 
 #[derive(Clone, Copy, Debug, PartialEq, Format)]

@@ -5,7 +5,7 @@ use defmt::info;
 
 use viking_protocol::{protocol::spi, U32};
 
-use crate::viking::{const_bytes, take_first, ResourceMode, Writer};
+use crate::{const_bytes, take_first, ResourceMode, Writer};
 use super::sercom::{ DynSercom, Sercom };
 
 pub struct SercomSPI<S, const DOPO: u8, const DIPO: u8> {
@@ -136,26 +136,6 @@ async fn transfer(sercom: DynSercom, request: &mut &[u8], response: &mut Writer<
     for _ in 0..len {
         let so_byte = take_first(request).ok_or(())?;
         regs.data.write(|w| w.data().variant(so_byte as u16));
-
-        regs.intenset.write(|w| { w.txc().set_bit() });
-        sercom.notify().until(|| {
-            regs.intflag.read().txc().bit_is_set()
-        }).await;
-
-        let si_byte = regs.data.read().data().bits() as u8;
-        response.put(si_byte)?;
-    }
-
-    Ok(())
-}
-
-async fn read(sercom: DynSercom, request: &mut &[u8], response: &mut Writer<'_>) -> Result<(), ()> {
-    let regs = sercom.regs().spi();
-
-    let len = take_first(request).ok_or(())? as u8;
-
-    for _ in 0..len {
-        regs.data.write(|w| w.data().variant(0));
 
         regs.intenset.write(|w| { w.txc().set_bit() });
         sercom.notify().until(|| {
