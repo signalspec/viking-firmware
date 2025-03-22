@@ -1,8 +1,8 @@
 use core::{cell::Cell, marker::PhantomData, task::Waker};
 
-use zeptos::{executor::{Interrupt, TaskOnly}, samd::gpio::{Alternate, TypePin}};
+use zeptos::{executor::{Interrupt, TaskOnly}, samd::{gpio::{Alternate, TypePin}, pac::dmac::{active, ACTIVE}}};
 use defmt::info;
-use viking_protocol::protocol::gpio;
+use viking_protocol::protocol::{gpio, led};
 use zeptos::samd::pac::{interrupt, EIC};
 
 use crate::viking::{ResourceMode, Writer};
@@ -149,4 +149,51 @@ static INT: TaskOnly<Interrupt> = unsafe { TaskOnly::new(Interrupt::new()) };
 fn EIC() {
     let eic = unsafe { EIC::steal() };
     unsafe { INT.get_unchecked().notify(); }
+}
+
+pub struct Led<P, const ACTIVE: bool, const COLOR: u8>(PhantomData<P>);
+
+impl<P: TypePin, const ACTIVE: bool, const COLOR: u8> ResourceMode for Led<P, {ACTIVE}, {COLOR}> {
+    const PROTOCOL: u16 = led::binary::PROTOCOL;
+    const DESCRIPTOR: &'static [u8] = &[COLOR];
+
+    fn init(_config: &[u8]) -> Result<Self, ()> {
+        info!("led init {:?} {:?}", P::DYN.group, P::DYN.pin);
+        if ACTIVE {
+            P::outset();
+        } else {
+            P::outclr();
+        }
+        P::dirset();
+        Ok(Led(PhantomData))
+    }
+
+    fn deinit(self) {
+        P::dirclr();
+        info!("led deinit");
+    }
+
+    async fn command(&self, command: u8, _buf: &mut &[u8], response: &mut Writer<'_>) -> Result<(), ()> {
+        use viking_protocol::protocol::led::binary::cmd;
+        
+        match command {
+            cmd::OFF => {
+                if ACTIVE {
+                    P::outclr();
+                } else {
+                    P::outset();
+                }
+                Ok(())
+            }
+            cmd::ON => {
+                if ACTIVE {
+                    P::outset();
+                } else {
+                    P::outclr();
+                }
+                Ok(())
+            }
+            _ => Err(())
+        }
+    }
 }

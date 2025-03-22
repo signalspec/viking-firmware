@@ -1,7 +1,7 @@
 #[path = "../../chip/rp/mod.rs"]
 mod rp;
 
-use rp::Gpio;
+use rp::{Gpio, Led};
 use zeptos::rp::gpio::*;
 
 pub const PRODUCT_STRING: &'static str = "RP2040 Pico";
@@ -149,7 +149,7 @@ crate::viking::viking!(
         }
 
         led {
-            gpio: Gpio<GPIO25>,
+            led: Led<GPIO25, true, { viking_protocol::protocol::led::binary::color::GREEN }>,
         }
 
         spi0 {

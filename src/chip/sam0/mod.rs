@@ -2,7 +2,7 @@ mod sercom;
 pub use sercom::{ Sercom0, Sercom1, Sercom2 };
 
 mod gpio;
-pub use gpio::{Gpio, LevelInterrupt};
+pub use gpio::{Gpio, LevelInterrupt, Led};
 
 mod i2c;
 pub use i2c::{SercomI2C, SercomSCLPin, SercomSDAPin};

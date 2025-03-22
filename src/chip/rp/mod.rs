@@ -1,2 +1,2 @@
 mod gpio;
-pub use gpio::Gpio;
+pub use gpio::{Gpio, Led};

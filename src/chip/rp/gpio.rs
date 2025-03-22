@@ -2,7 +2,7 @@ use core::{cell::Cell, marker::PhantomData, task::Waker};
 
 use zeptos::{executor::{Interrupt, TaskOnly}, rp::gpio::*, rp::pac::interrupt};
 use defmt::info;
-use viking_protocol::protocol::gpio;
+use viking_protocol::protocol::{gpio, led};
 
 use crate::viking::{ResourceMode, Writer};
 
@@ -151,3 +151,50 @@ fn IO_IRQ_BANK0() {
 }
 
 */
+
+pub struct Led<P, const ACTIVE: bool, const COLOR: u8>(PhantomData<P>);
+
+impl<P: TypePin, const ACTIVE: bool, const COLOR: u8> ResourceMode for Led<P, {ACTIVE}, {COLOR}> {
+    const PROTOCOL: u16 = led::binary::PROTOCOL;
+    const DESCRIPTOR: &'static [u8] = &[COLOR];
+
+    fn init(_config: &[u8]) -> Result<Self, ()> {
+        P::set_function(Function::F5);
+        if ACTIVE {
+            P::out_set();
+        } else {
+            P::out_clr();
+        }
+        P::oe_set();
+        Ok(Led(PhantomData))
+    }
+
+    fn deinit(self) {
+        P::oe_clr();
+        P::disable();
+    }
+
+    async fn command(&self, command: u8, _buf: &mut &[u8], _response: &mut Writer<'_>) -> Result<(), ()> {
+        use viking_protocol::protocol::led::binary::cmd;
+        
+        match command {
+            cmd::OFF => {
+                if ACTIVE {
+                    P::out_clr();
+                } else {
+                    P::out_set();
+                }
+                Ok(())
+            }
+            cmd::ON => {
+                if ACTIVE {
+                    P::out_set();
+                } else {
+                    P::out_clr();
+                }
+                Ok(())
+            }
+            _ => Err(())
+        }
+    }
+}

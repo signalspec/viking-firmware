@@ -48,8 +48,8 @@ crate::viking::viking!(
             gpio: sam0::Gpio<PA11>,
             level_interrupt: sam0::LevelInterrupt<PA11, 11>,
         }
-        pb30 {
-            gpio: sam0::Gpio<PB30>,
+        led {
+            led: sam0::Led<PB30, false, { viking_protocol::protocol::led::binary::color::AMBER }>,
         }
         sercom0 {
             i2c: sam0::SercomI2C<Sercom0>,

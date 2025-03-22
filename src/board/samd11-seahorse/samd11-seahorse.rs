@@ -41,6 +41,9 @@ pub fn init() {
 
 crate::viking::viking!(
     viking_impl {
+        led {
+            led: sam0::Led<PA03, false, { viking_protocol::protocol::led::binary::color::RED }>,
+        }
         ce {
             gpio: sam0::Gpio<PA02>,
         }
