@@ -1,0 +1,6 @@
+[alias]
+xtask = "run --manifest-path ./xtask/Cargo.toml --"
+
+[patch.crates-io]
+zeptos = { path = "../../zeptos" }
+viking-protocol = { path = "../viking/viking-protocol" }

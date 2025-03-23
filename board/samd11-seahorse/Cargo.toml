@@ -5,19 +5,23 @@ license = "MIT OR Apache-2.0"
 edition = "2024"
 
 [dependencies]
-cortex-m-rt = { workspace = true }
-cortex-m = { workspace = true, features = ["critical-section-single-core", "inline-asm"] }
-defmt = { workspace = true }
-defmt-rtt = { workspace = true }
-futures-util = { workspace = true, default-features = false, features = ["async-await", "async-await-macro"] }
-panic-probe = { workspace = true }
-pin-project-lite = { workspace = true }
-scopeguard = { workspace = true, default_features = false }
-viking-protocol = { workspace = true }
-usb = { workspace = true }
-zeptos = { workspace = true, features = ["samd11", "usb", "samd-clock-48m-usb"] }
-viking-firmware-common = { workspace = true, features = ["samd11"] }
+cortex-m-rt = "0.7"
+cortex-m = { version = "0.7", features = ["critical-section-single-core", "inline-asm"] }
+zeptos = { version = "0.1", features = ["samd11", "usb", "samd-clock-48m-usb"]  }
+viking-firmware-common = { path = "../../common", features = ["samd11"] }
 
 [[bin]]
 name = "viking-firmware-samd11-seahorse"
 path = "main.rs"
+
+[profile.dev]
+incremental = false
+codegen-units = 1
+lto = true
+opt-level = "z"
+
+[profile.release]
+debug = true
+codegen-units = 1
+lto = true
+opt-level = "z"

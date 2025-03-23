@@ -3,7 +3,6 @@
 #![feature(macro_metavar_expr)]
 #![feature(inline_const_pat)]
 
-
 use panic_probe as _;
 use defmt_rtt as _;
 
@@ -41,6 +40,15 @@ pub trait ResourceMode: Sized {
     fn poll_event(&self, _waker: &Waker, _resource: u8, _buf: &mut Writer<'_>) {}
 }
 
+#[doc(hidden)]
+pub mod deps {
+    // Dependency re-exports for use in the macro
+    pub use usb;
+    pub use futures_util;
+    pub use defmt;
+    pub use viking_protocol;
+}
+
 #[macro_export]
 macro_rules! viking{
     (
@@ -64,9 +72,11 @@ macro_rules! viking{
             use core::pin::pin;
             use core::ptr::addr_of_mut;
             use core::task::{Poll, Waker};
-            use futures_util::future::{Fuse, FusedFuture};
-            use futures_util::FutureExt;
-            use defmt::info;
+            use $crate::deps::futures_util::future::{Fuse, FusedFuture};
+            use $crate::deps::futures_util::FutureExt;
+            use $crate::deps::defmt::info;
+            use $crate::deps::viking_protocol;
+            use $crate::deps::usb;
             use zeptos::usb::descriptors::{descriptors, BinaryObjectStore, Config, DescriptorBuilder, Device, Endpoint, Interface, MicrosoftOs, MicrosoftOsCompatibleID, PlatformCapabilityMicrosoftOs, LANGUAGE_LIST_US_ENGLISH };
             use zeptos::usb::{Usb, Endpoints, In, Out, Responded, Setup, UsbBuffer};
             use zeptos::Runtime;
@@ -109,7 +119,7 @@ macro_rules! viking{
             }
 
             const VIKING_DESCRIPTOR: &'static [u8] = const {
-                use ::viking_protocol::descriptor::*;
+                use viking_protocol::descriptor::*;
                 const PARTS: &[(u8, Option<u16>, &[u8])] = &[
                     (DESCRIPTOR_TYPE_VIKING, Some(0), &[]),
                     $(

@@ -6,11 +6,9 @@
 
 use viking_firmware_common::rp::{Gpio, Led, Platform};
 use zeptos::rp::gpio::*;
-use defmt::info;
 
 #[zeptos::main]
 async fn main(rt: zeptos::Runtime, hw: zeptos::Hardware) {
-    info!("init");
     let (usb, systick, platform) = Platform::new(rt, hw);
     viking_impl::run(usb, systick, platform).await;
 }

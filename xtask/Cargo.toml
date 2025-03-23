@@ -1,0 +1,8 @@
+[package]
+name = "xtask"
+edition = "2024"
+
+[[bin]]
+name = "xtask"
+path = "main.rs"
+
