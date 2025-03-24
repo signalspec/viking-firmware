@@ -83,7 +83,7 @@ macro_rules! viking{
             use zeptos::cortex_m::SysTick;
             use $crate::{Writer, Reader};
             use $crate::usb_descriptors::{EP_IN, EP_OUT, EP_EVT};
-
+            use $crate::deps::viking_protocol::{U32, U16};
 
             $(const $name: $ty = $val;)*
 
@@ -121,7 +121,16 @@ macro_rules! viking{
             const VIKING_DESCRIPTOR: &'static [u8] = const {
                 use viking_protocol::descriptor::*;
                 const PARTS: &[(u8, Option<u16>, &[u8])] = &[
-                    (DESCRIPTOR_TYPE_VIKING, Some(0), &[]),
+                    (DESCRIPTOR_TYPE_VIKING, None, viking_firmware_common::const_bytes!(
+                        VikingDescriptor {
+                            total_len: U16::new(0), // filled below
+                            version: 0x01,
+                            rsvd: 0x00,
+                            max_cmd: U32::new(CMD_BUF_SIZE as u32),
+                            max_res: U32::new(RES_BUF_SIZE as u32),
+                            max_evt: U32::new(EVT_BUF_SIZE as u32),
+                        }
+                    )),
                     $(
                         (DESCRIPTOR_TYPE_RESOURCE, None, &[]),
                         (DESCRIPTOR_TYPE_IDENTIFIER, None, stringify!($resource_name).as_bytes()),
@@ -448,6 +457,7 @@ macro_rules! viking{
     }
 }
 
+#[macro_export]
 macro_rules! const_bytes {
     ($($n:ident)::+ { $($inner:tt)* }) => {
         const {
@@ -460,5 +470,3 @@ macro_rules! const_bytes {
         }
     }
 }
-
-pub(crate) use const_bytes;
