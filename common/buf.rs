@@ -1,4 +1,4 @@
- pub struct Writer<'a> {
+pub struct Writer<'a> {
     offset: usize,
     buf: &'a mut [u8],
 }
@@ -20,15 +20,38 @@ impl<'a> Writer<'a> {
     }
 }
 
-pub fn take_first<'a>(buf: &mut &'a [u8]) -> Option<u8> {
-    let (first, rem) = buf.split_first()?;
-    *buf = rem;
-    Some(*first)
+pub struct Reader<'a> {
+    buf: &'a [u8],
 }
 
-pub fn take_len<'a>(buf: &mut &'a [u8]) -> Option<&'a [u8]> {
-    let len = take_first(buf)? as usize;
-    let s = buf.get(..len)?;
-    *buf = &buf[len..];
-    Some(s)
+impl<'a> Reader<'a> {
+    pub fn new(buf: &'a [u8]) -> Reader<'a> {
+        Reader { buf }
+    }
+    
+    pub fn take_first(&mut self) -> Option<u8> {
+        let (first, rem) = self.buf.split_first()?;
+        self.buf = rem;
+        Some(*first)
+    }
+
+    pub fn take_len(&mut self) -> Option<&'a [u8]> {
+        let len = self.take_first()? as usize;
+        let (first, rem) = self.buf.split_at(len);
+        self.buf = rem;
+        Some(first)
+    }
+
+    pub fn take_varint(&mut self) -> Option<u32> {
+        let mut val = 0;
+        loop {
+            let b = self.take_first()?;
+            val = (val << 7) | (b & ((1<<7) - 1)) as u32;
+            if b & (1<<7) == 0 {
+                break;
+            }
+        }
+        Some(val)
+    }
 }
+

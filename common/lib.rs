@@ -9,7 +9,7 @@ use defmt_rtt as _;
 use core::task::Waker;
 
 mod buf;
-pub use buf::{Writer, take_first, take_len};
+pub use buf::{Writer, Reader};
 
 #[doc(hidden)]
 pub mod usb_descriptors;
@@ -33,7 +33,7 @@ pub trait ResourceMode: Sized {
     fn deinit(self);
 
     #[allow(async_fn_in_trait)]
-    async fn command(&self, _cmd: u8, _buf: &mut &[u8], _res: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&self, _cmd: u8, _buf: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
         Err(())
     }
 
@@ -81,7 +81,7 @@ macro_rules! viking{
             use zeptos::usb::{Usb, Endpoints, In, Out, Responded, Setup, UsbBuffer};
             use zeptos::Runtime;
             use zeptos::cortex_m::SysTick;
-            use $crate::{Writer, take_first, take_len};
+            use $crate::{Writer, Reader};
             use $crate::usb_descriptors::{EP_IN, EP_OUT, EP_EVT};
 
 
@@ -224,29 +224,22 @@ macro_rules! viking{
                     )*
                 }
 
-                async fn run(&self, mut systick: &mut SysTick, mut request: &[u8], response: &mut Writer<'_>) -> Result<(), ()> {
-                    while let Some(byte) = take_first(&mut request) {
+                async fn run(&self, mut systick: &mut SysTick, mut req: Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
+                    while let Some(byte) = req.take_first() {
                         use viking_protocol::protocol::cmd::DELAY;
                         match byte {
                             DELAY => {
-                                let mut us: u32 = 0;
-                                loop {
-                                    let b = take_first(&mut request).ok_or(())?;
-                                    us = (us << 7) | (b & ((1<<7) - 1)) as u32;
-                                    if us > 0xFFFF {
-                                        info!("Delay too long");
-                                        return Err(());
-                                    }
-                                    if b & (1<<7) == 0 {
-                                        break;
-                                    }
+                                let mut us: u32 = req.take_varint().ok_or(())?;
+                                if us > 0xFFFF {
+                                    info!("Delay too long");
+                                    return Err(());
                                 }
                                 systick.delay_us(us).await;
                             }
                             byte => {
                                 let resource = byte & ((1 << 6) - 1);
                                 let command = byte >> 6;
-                                self.command(resource, command, &mut request, response).await?;
+                                self.command(resource, command, &mut req, res).await?;
                             }
                         }
                     }
@@ -254,12 +247,12 @@ macro_rules! viking{
                     Ok(())
                 }
 
-                async fn command(&self, resource: u8, command: u8, buf: &mut &[u8], response: &mut viking::Writer<'_>) -> Result<(), ()> {
+                async fn command(&self, resource: u8, command: u8, req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
                     use viking::ResourceMode;
                     match resource {
                         $(
                             const { ${index()} + 1 } => match &self.$resource_name {
-                                $(Some(resources::$resource_name::$mode_name(s)) => s.command(command, buf, response).await,)*
+                                $(Some(resources::$resource_name::$mode_name(s)) => s.command(command, req, res).await,)*
                                 _ => Err(())
                             }
                         )*
@@ -403,14 +396,15 @@ macro_rules! viking{
                         }
                         let sync = buf_out[0];
             
-                        let mut response = Writer::new(&mut buf_in[..], 2);
+                        let req = Reader::new(&buf_out[2..len]);
+                        let mut res = Writer::new(&mut buf_in[..], 2);
                         
-                        let status = match resources.borrow().run(&mut *systick.borrow_mut(), &buf_out[2..len], &mut response).await {
+                        let status = match resources.borrow().run(&mut *systick.borrow_mut(), req, &mut res).await {
                             Ok(_) => 0,
                             Err(_) => 1,
                         };
                         
-                        let response_len = response.offset();
+                        let response_len = res.offset();
                         buf_in[0] = sync;
                         buf_in[1] = status;
                         ep_in.send(buf_in, response_len, true).await; //todo zlp

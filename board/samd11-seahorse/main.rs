@@ -5,7 +5,7 @@
 #![feature(inline_const_pat)]
 
 use viking_firmware_common::sam0::{ self, Sercom0, Sercom1, Platform };
-use zeptos::samd::{gpio::{alternate::*, *}, pac::Interrupt};
+use zeptos::samd::{gpio::*, pac::Interrupt};
 
 #[zeptos::main]
 async fn main(rt: zeptos::Runtime, hw: zeptos::Hardware) {

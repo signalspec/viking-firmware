@@ -6,7 +6,7 @@ use defmt::{debug, info, Format};
 
 use viking_protocol::protocol::i2c;
 
-use crate::{const_bytes, take_first, take_len, ResourceMode, Writer};
+use crate::{const_bytes, Reader, ResourceMode, Writer};
 use super::sercom::{ Sercom, DynSercom };
 
 #[derive(Clone, Copy, Debug, PartialEq, Format)]
@@ -39,7 +39,7 @@ impl<S: Sercom> ResourceMode for SercomI2C<S> {
         )
     };
 
-    fn init(config: &[u8]) -> Result<Self, ()> {
+    fn init(_config: &[u8]) -> Result<Self, ()> {
         info!("i2c init");
         init(DynSercom(S::NUM));
         Ok(SercomI2C { _p: PhantomData, state: Cell::new(State::Idle) })
@@ -50,17 +50,17 @@ impl<S: Sercom> ResourceMode for SercomI2C<S> {
         deinit(DynSercom(S::NUM));
     }
 
-    async fn command(&self, command: u8, buf: &mut &[u8], response: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&self, command: u8, req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
         use i2c::controller::cmd;
         let sercom = DynSercom(S::NUM);
         
         match command {
             cmd::START => {
-                let addr = take_first(buf).ok_or(())?;
+                let addr = req.take_first().ok_or(())?;
                 debug!("i2c start {:x} {:?}", addr, self.state.get());
-                let res = start(sercom, addr, &self.state).await;
+                let r = start(sercom, addr, &self.state).await;
                 debug!("i2c start -> {} {:?}", res, self.state.get());
-                response.put(res)?;
+                res.put(r)?;
                 Ok(())
             }
             cmd::STOP => {
@@ -70,12 +70,12 @@ impl<S: Sercom> ResourceMode for SercomI2C<S> {
             }
             cmd::READ => {
                 debug!("i2c read {:?}", self.state.get());
-                let len = take_first(buf).ok_or(())? as u8;
-                read(sercom, len, response, &self.state).await
+                let len = req.take_first().ok_or(())? as u8;
+                read(sercom, len, res, &self.state).await
             }
             cmd::WRITE => {
                 debug!("i2c write {:?}", self.state.get());
-                let buf = take_len(buf).ok_or(())?;
+                let buf = req.take_len().ok_or(())?;
                 write(sercom, buf, &self.state).await?;
                 Ok(())
             }

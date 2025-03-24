@@ -1,11 +1,11 @@
 use core::marker::PhantomData;
 
-use zeptos::samd::{gpio::{AlternateFunc, TypePin}, pac::sercom0::I2CM};
+use zeptos::samd::gpio::{AlternateFunc, TypePin};
 use defmt::info;
 
 use viking_protocol::{protocol::spi, U32};
 
-use crate::{const_bytes, take_first, ResourceMode, Writer};
+use crate::{const_bytes, Reader, ResourceMode, Writer};
 use super::sercom::{ DynSercom, Sercom };
 
 pub struct SercomSPI<S, const DOPO: u8, const DIPO: u8> {
@@ -38,13 +38,13 @@ impl<S: Sercom, const DOPO: u8, const DIPO: u8> ResourceMode for SercomSPI<S, DO
         deinit(DynSercom(S::NUM));
     }
 
-    async fn command(&self, command: u8, buf: &mut &[u8], response: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&self, command: u8, req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
         use spi::controller::cmd;
         let sercom = DynSercom(S::NUM);
         
         match command {
             cmd::TRANSFER => {
-                transfer(sercom, buf, response).await?;
+                transfer(sercom, req, res).await?;
                 Ok(())
             }
             _ => Err(())
@@ -123,18 +123,13 @@ fn deinit(sercom: DynSercom) {
     sercom.regs().spi().ctrla.write(|w| w.swrst().set_bit());
 }
 
-#[inline]
-fn sync_sysop(regs: &I2CM) {
-    while regs.syncbusy.read().sysop().bit_is_set() {}
-}
-
-async fn transfer(sercom: DynSercom, request: &mut &[u8], response: &mut Writer<'_>) -> Result<(), ()> {
+async fn transfer(sercom: DynSercom, request: &mut Reader<'_>, response: &mut Writer<'_>) -> Result<(), ()> {
     let regs = sercom.regs().spi();
 
-    let len = take_first(request).ok_or(())? as u8;
+    let len = request.take_first().ok_or(())? as u8;
 
     for _ in 0..len {
-        let so_byte = take_first(request).ok_or(())?;
+        let so_byte = request.take_first().ok_or(())?;
         regs.data.write(|w| w.data().variant(so_byte as u16));
 
         regs.intenset.write(|w| { w.txc().set_bit() });

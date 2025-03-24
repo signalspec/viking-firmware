@@ -5,7 +5,7 @@ use defmt::info;
 use viking_protocol::protocol::{gpio, led};
 use zeptos::samd::pac::{interrupt, EIC};
 
-use crate::{ResourceMode, Writer};
+use crate::{Reader, ResourceMode, Writer};
 
 pub struct Gpio<P>(PhantomData<P>);
 
@@ -25,7 +25,7 @@ impl<P: TypePin> ResourceMode for Gpio<P> {
         P::dirclr();
     }
 
-    async fn command(&self, command: u8, _buf: &mut &[u8], response: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&self, command: u8, _req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
         use viking_protocol::protocol::gpio::pin::cmd;
         
         match command {
@@ -35,7 +35,7 @@ impl<P: TypePin> ResourceMode for Gpio<P> {
             }
             cmd::READ => {
                 let byte: u8 = if P::read() { 0x01 } else { 0x00 };
-                response.put(byte)?;
+                res.put(byte)?;
                 Ok(())
             }
             cmd::LOW => {
@@ -74,7 +74,7 @@ impl<P: TypePin, const CH: u8> ResourceMode for LevelInterrupt<P, CH> {
         P::set_io();
     }
 
-    async fn command(&self, command: u8, _buf: &mut &[u8], _response: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&self, command: u8, _req: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
         use viking_protocol::protocol::gpio::level_interrupt::cmd;
         
         let (sense, event) = match command {
@@ -147,7 +147,7 @@ static INT: TaskOnly<Interrupt> = unsafe { TaskOnly::new(Interrupt::new()) };
 
 #[interrupt]
 fn EIC() {
-    let eic = unsafe { EIC::steal() };
+    let _eic = unsafe { EIC::steal() };
     unsafe { INT.get_unchecked().notify(); }
 }
 
@@ -173,7 +173,7 @@ impl<P: TypePin, const ACTIVE: bool, const COLOR: u8> ResourceMode for Led<P, {A
         info!("led deinit");
     }
 
-    async fn command(&self, command: u8, _buf: &mut &[u8], response: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&self, command: u8, _req: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
         use viking_protocol::protocol::led::binary::cmd;
         
         match command {
