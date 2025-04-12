@@ -1,7 +1,6 @@
 #![no_std]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(macro_metavar_expr)]
-#![feature(inline_const_pat)]
 
 use panic_probe as _;
 use defmt_rtt as _;
@@ -214,10 +213,10 @@ macro_rules! viking{
                     #![allow(unreachable_code)]
                     match resource {
                         $(
-                            const { ${index()} + 1 } => {
+                            res_id if res_id == const { ${index()} + 1 } => {
                                 if let Some(r) = self.$resource_name.take() { r.deinit() }
                                 self.$resource_name = Some(match mode {
-                                    $(const { ${index()} + 1 } => resources::$resource_name::$mode_name(<$mode_ty as viking::ResourceMode>::init(config)?),)*
+                                    $(mode_id if mode_id == const { ${index()} + 1 } => resources::$resource_name::$mode_name(<$mode_ty as viking::ResourceMode>::init(config)?),)*
                                     _ => return Err(())
                                 });
                                 Ok(())
@@ -260,7 +259,7 @@ macro_rules! viking{
                     use viking::ResourceMode;
                     match resource {
                         $(
-                            const { ${index()} + 1 } => match &self.$resource_name {
+                            res_id if res_id == const { ${index()} + 1 } => match &self.$resource_name {
                                 $(Some(resources::$resource_name::$mode_name(s)) => s.command(command, req, res).await,)*
                                 _ => Err(())
                             }

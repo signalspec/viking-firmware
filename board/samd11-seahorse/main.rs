@@ -2,7 +2,6 @@
 #![no_main]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(macro_metavar_expr)]
-#![feature(inline_const_pat)]
 
 use viking_firmware_common::sam0::{ self, Sercom0, Sercom1, Platform };
 use zeptos::samd::{gpio::*, pac::Interrupt};
