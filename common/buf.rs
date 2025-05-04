@@ -42,16 +42,10 @@ impl<'a> Reader<'a> {
         Some(first)
     }
 
-    pub fn take_varint(&mut self) -> Option<u32> {
-        let mut val = 0;
-        loop {
-            let b = self.take_first()?;
-            val = (val << 7) | (b & ((1<<7) - 1)) as u32;
-            if b & (1<<7) == 0 {
-                break;
-            }
-        }
-        Some(val)
+    pub fn take_u16(&mut self) -> Option<u16> {
+        let (first, rem) = self.buf.split_at_checked(2)?;
+        self.buf = rem;
+        Some(u16::from_le_bytes([first[0], first[1]]))
     }
 }
 

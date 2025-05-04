@@ -237,11 +237,7 @@ macro_rules! viking{
                         use viking_protocol::protocol::cmd::DELAY;
                         match byte {
                             DELAY => {
-                                let mut us: u32 = req.take_varint().ok_or(())?;
-                                if us > 0xFFFF {
-                                    info!("Delay too long");
-                                    return Err(());
-                                }
+                                let mut us: u32 = req.take_u16().ok_or(())? as u32;
                                 systick.delay_us(us).await;
                             }
                             byte => {
