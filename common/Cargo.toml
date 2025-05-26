@@ -7,15 +7,15 @@ edition = "2024"
 [dependencies]
 cortex-m-rt = "0.7"
 cortex-m = { version = "0.7", features = ["critical-section-single-core", "inline-asm"] }
-defmt = "0.3.6"
-defmt-rtt = "0.4.0"
+defmt = "1.0.1"
+defmt-rtt = "1.0.0"
 futures-util = { version = "0.3.30", default-features = false, features = ["async-await", "async-await-macro"] }
-panic-probe = { version = "0.3" }
+panic-probe = { version = "1.0" }
 pin-project-lite = "0.2.14"
 scopeguard = { version = "1.2.0", default-features = false }
 viking-protocol = "0.1"
 usb = "0.3"
-zeptos = { version = "0.1", features = ["usb"] }
+zeptos = { version = "0.1", features = ["usb", "time"] }
 
 [features]
 samd11 = ["zeptos/samd11"]

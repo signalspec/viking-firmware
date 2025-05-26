@@ -1,4 +1,4 @@
-use zeptos::{executor::{Interrupt, TaskOnly}, samd::pac::{interrupt, sercom0::RegisterBlock, SERCOM0, SERCOM1}};
+use zeptos::{Interrupt, TaskOnly, samd::pac::{interrupt, sercom0::RegisterBlock, SERCOM0, SERCOM1}};
 
 pub trait Sercom {
     const NUM: usize;

@@ -8,8 +8,8 @@ use zeptos::rp::gpio::*;
 
 #[zeptos::main]
 async fn main(rt: zeptos::Runtime, hw: zeptos::Hardware) {
-    let (usb, systick, platform) = Platform::new(rt, hw);
-    viking_impl::run(usb, systick, platform).await;
+    let (usb, platform) = Platform::new(rt, hw);
+    viking_impl::run(usb, platform).await;
 }
 
 viking_firmware_common::viking!(

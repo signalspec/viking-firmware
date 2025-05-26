@@ -59,7 +59,7 @@ impl<S: Sercom> ResourceMode for SercomI2C<S> {
                 let addr = req.take_first().ok_or(())?;
                 debug!("i2c start {:x} {:?}", addr, self.state.get());
                 let r = start(sercom, addr, &self.state).await;
-                debug!("i2c start -> {} {:?}", res, self.state.get());
+                debug!("i2c start -> {} {:?}", r, self.state.get());
                 res.put(r)?;
                 Ok(())
             }

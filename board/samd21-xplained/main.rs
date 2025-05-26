@@ -27,8 +27,8 @@ async fn main(rt: zeptos::Runtime, hw: zeptos::Hardware) {
         cortex_m::peripheral::NVIC::unmask(Interrupt::EIC);
     }
 
-    let (usb, systick, platform) = Platform::new(rt, hw);
-    viking_impl::run(usb, systick, platform).await;
+    let (usb, platform) = Platform::new(rt, hw);
+    viking_impl::run(usb, platform).await;
 }
 
 

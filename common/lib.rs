@@ -79,18 +79,16 @@ macro_rules! viking{
             use zeptos::usb::descriptors::{descriptors, BinaryObjectStore, Config, DescriptorBuilder, Device, Endpoint, Interface, MicrosoftOs, MicrosoftOsCompatibleID, PlatformCapabilityMicrosoftOs, LANGUAGE_LIST_US_ENGLISH };
             use zeptos::usb::{Usb, Endpoints, In, Out, Responded, Setup, UsbBuffer};
             use zeptos::Runtime;
-            use zeptos::cortex_m::SysTick;
             use $crate::{Writer, Reader};
             use $crate::usb_descriptors::{EP_IN, EP_OUT, EP_EVT};
             use $crate::deps::viking_protocol::{U32, U16};
 
             $(const $name: $ty = $val;)*
 
-            pub async fn run(mut usb: Usb, systick: SysTick, platform: $platform_ty) -> Infallible {
+            pub async fn run(mut usb: Usb, platform: $platform_ty) -> Infallible {
                 let rt = usb.rt();;
                 usb.run_device(&mut Handler {
                     rt,
-                    systick: RefCell::new(systick),
                     platform,
                     resources: RefCell::new(Resources::new()),
                 }).await
@@ -232,13 +230,13 @@ macro_rules! viking{
                     )*
                 }
 
-                async fn run(&self, mut systick: &mut SysTick, mut req: Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
+                async fn run(&self, rt: Runtime, mut req: Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
                     while let Some(byte) = req.take_first() {
                         use viking_protocol::protocol::cmd::DELAY;
                         match byte {
                             DELAY => {
                                 let mut us: u32 = req.take_u16().ok_or(())? as u32;
-                                systick.delay_us(us).await;
+                                rt.delay_us(us).await;
                             }
                             byte => {
                                 let resource = byte & ((1 << 6) - 1);
@@ -283,7 +281,6 @@ macro_rules! viking{
 
             struct Handler {
                 rt: Runtime,
-                systick: RefCell<SysTick>,
                 platform: Platform,
                 resources: RefCell<Resources>,
             }
@@ -314,6 +311,7 @@ macro_rules! viking{
                 }
             
                 async fn set_interface(&self, intf: u8, alt: u8, usb: &mut Endpoints) -> Result<(), ()> {
+                    let rt = self.rt;
                     if intf == 0 {
                         bulk_task(self.rt).cancel();
                         evt_task(self.rt).cancel();
@@ -327,10 +325,9 @@ macro_rules! viking{
                             let ep_evt = usb.bulk_in::<EP_EVT>();
 
                             // usb.run never exits, so `self` lasts for static.
-                            let systick = unsafe { core::mem::transmute::<&_, &'static _>(&self.systick) };
                             let resources = unsafe { core::mem::transmute::<&_, &'static _>(&self.resources) };
                 
-                            bulk_task(self.rt).spawn(systick, resources, ep_out, ep_in);
+                            bulk_task(self.rt).spawn(self.rt, resources, ep_out, ep_in);
                             evt_task(self.rt).spawn(resources, ep_evt);
                         } else {
                             info!("Disabled interface");
@@ -386,7 +383,7 @@ macro_rules! viking{
             }
             
             #[zeptos::task]
-            async fn bulk_task(systick: &'static RefCell<SysTick>, resources: &'static RefCell<Resources>, mut ep_out: zeptos::usb::Endpoint<Out, EP_OUT>, mut ep_in: zeptos::usb::Endpoint<In, EP_IN>) {
+            async fn bulk_task(rt: Runtime, resources: &'static RefCell<Resources>, mut ep_out: zeptos::usb::Endpoint<Out, EP_OUT>, mut ep_in: zeptos::usb::Endpoint<In, EP_IN>) {
                 loop {
                     let buf_out = unsafe { &mut *addr_of_mut!(BULK_OUT_BUF) };
                     let buf_in = unsafe { &mut *addr_of_mut!(BULK_IN_BUF) };
@@ -403,7 +400,7 @@ macro_rules! viking{
                         let req = Reader::new(&buf_out[2..len]);
                         let mut res = Writer::new(&mut buf_in[..], 2);
                         
-                        let status = match resources.borrow().run(&mut *systick.borrow_mut(), req, &mut res).await {
+                        let status = match resources.borrow().run(rt, req, &mut res).await {
                             Ok(_) => 0,
                             Err(_) => 1,
                         };
@@ -425,7 +422,7 @@ macro_rules! viking{
                 
                 loop {
                     let mut transfer = pin!(Fuse::terminated());
-                    let mut buf = Writer::new(unsafe { &mut (*buf_fill)[..] }, 0);
+                    let mut buf = Writer::new(unsafe { &mut (&mut *buf_fill)[..] }, 0);
             
                     poll_fn(|cx| -> Poll<Infallible> {
                         //EVENT_CHANGE.subscribe(cx.waker());
@@ -436,7 +433,7 @@ macro_rules! viking{
             
                         if transfer.is_terminated() && buf.offset() > 0 {
                             let len = buf.offset();
-                            buf = Writer::new(unsafe { &mut (*buf_send)[..] }, 0);
+                            buf = Writer::new(unsafe { &mut (&mut *buf_send)[..] }, 0);
                             info!("Sending events: {}", len);
                             let mut ep_evt = ep_evt.borrow_mut();
                             transfer.set(async move { ep_evt.send(unsafe { &mut *buf_fill }, len, true).await }.fuse());

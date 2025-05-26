@@ -37,8 +37,8 @@ async fn main(rt: zeptos::Runtime, hw: zeptos::Hardware) {
     PA22::set_alternate(Alternate::C); // SDA
     PA23::set_alternate(Alternate::C); // SCL
 
-    let (usb, systick, platform) = Platform::new(rt, hw);
-    viking_impl::run(usb, systick, platform).await;
+    let (usb, platform) = Platform::new(rt, hw);
+    viking_impl::run(usb, platform).await;
 }
 
 viking_firmware_common::viking!(

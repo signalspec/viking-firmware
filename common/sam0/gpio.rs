@@ -1,6 +1,6 @@
 use core::{cell::Cell, marker::PhantomData, task::Waker};
 
-use zeptos::{executor::{Interrupt, TaskOnly}, samd::gpio::{Alternate, TypePin}};
+use zeptos::{Interrupt, TaskOnly, samd::gpio::{Alternate, TypePin}};
 use defmt::info;
 use viking_protocol::protocol::{gpio, led};
 use zeptos::samd::pac::{interrupt, EIC};

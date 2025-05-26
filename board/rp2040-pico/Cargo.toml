@@ -8,6 +8,7 @@ edition = "2024"
 cortex-m-rt = "0.7"
 zeptos = { version = "0.1", features = ["rp2040", "usb", "rp2040-boot2-w25q080"] }
 viking-firmware-common = { path = "../../common", features = ["rp2040"] }
+defmt = "1.0.1"
 
 [[bin]]
 name = "viking-firmware-rp2040-pico"
