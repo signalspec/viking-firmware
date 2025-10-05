@@ -1,6 +1,6 @@
 use core::marker::PhantomData;
 
-use zeptos::samd::gpio::{AlternateFunc, TypePin};
+use zeptos::{samd::gpio::{AlternateFunc, TypePin}, Runtime};
 use defmt::info;
 
 use viking_protocol::{protocol::spi, U32};
@@ -38,7 +38,7 @@ impl<S: Sercom, const DOPO: u8, const DIPO: u8> ResourceMode for SercomSPI<S, DO
         deinit(DynSercom(S::NUM));
     }
 
-    async fn command(&self, command: u8, req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&self, _rt: Runtime, command: u8, req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
         use spi::controller::cmd;
         let sercom = DynSercom(S::NUM);
         

@@ -1,9 +1,9 @@
 #![no_std]
-#![feature(impl_trait_in_assoc_type)]
 #![feature(macro_metavar_expr)]
 
 use panic_probe as _;
 use defmt_rtt as _;
+use zeptos::Runtime;
 
 use core::task::Waker;
 
@@ -20,7 +20,7 @@ pub mod rp;
 pub mod sam0;
 
 pub trait Platform {
-    
+
 }
 
 pub trait ResourceMode: Sized {
@@ -32,7 +32,7 @@ pub trait ResourceMode: Sized {
     fn deinit(self);
 
     #[allow(async_fn_in_trait)]
-    async fn command(&self, _cmd: u8, _buf: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&self, _rt: Runtime, _cmd: u8, _buf: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
         Err(())
     }
 
@@ -96,13 +96,13 @@ macro_rules! viking{
 
             mod resources {
                 use super::*;
-                
+
                 $(
                     #[allow(non_camel_case_types)]
                     pub enum $resource_name {
                         $($mode_name($mode_ty)),*
                     }
-    
+
                     impl $resource_name {
                         pub fn deinit(self) {
                             use viking::ResourceMode;
@@ -111,7 +111,7 @@ macro_rules! viking{
                             }
                         }
                     }
-            
+
                 )*
             }
 
@@ -241,7 +241,7 @@ macro_rules! viking{
                             byte => {
                                 let resource = byte & ((1 << 6) - 1);
                                 let command = byte >> 6;
-                                self.command(resource, command, &mut req, res).await?;
+                                self.command(rt, resource, command, &mut req, res).await?;
                             }
                         }
                     }
@@ -249,12 +249,12 @@ macro_rules! viking{
                     Ok(())
                 }
 
-                async fn command(&self, resource: u8, command: u8, req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
+                async fn command(&self, rt: Runtime, resource: u8, command: u8, req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
                     use viking::ResourceMode;
                     match resource {
                         $(
                             res_id if res_id == const { ${index()} + 1 } => match &self.$resource_name {
-                                $(Some(resources::$resource_name::$mode_name(s)) => s.command(command, req, res).await,)*
+                                $(Some(resources::$resource_name::$mode_name(s)) => s.command(rt, command, req, res).await,)*
                                 _ => Err(())
                             }
                         )*
@@ -265,14 +265,15 @@ macro_rules! viking{
                 fn poll_all(&self, waker: &core::task::Waker, buf: &mut viking::Writer) {
                     use viking::ResourceMode;
                     $(
+                        let res_id = const { ${index()} + 1 };
                         match &self.$resource_name {
-                            $(Some(resources::$resource_name::$mode_name(s)) => s.poll_event(waker, ${index()} + 1, buf),)*
+                            $(Some(resources::$resource_name::$mode_name(s)) => s.poll_event(waker, res_id, buf),)*
                             _ => {}
                         }
                     )*
                 }
             }
-        
+
 
             static mut BULK_OUT_BUF: UsbBuffer<{CMD_BUF_SIZE}> = UsbBuffer::new();
             static mut BULK_IN_BUF: UsbBuffer<{RES_BUF_SIZE}> = UsbBuffer::new();
@@ -284,12 +285,12 @@ macro_rules! viking{
                 platform: Platform,
                 resources: RefCell<Resources>,
             }
-            
+
             impl zeptos::usb::Handler for Handler {
                 fn get_descriptor<'a>(&self, kind: u8, index: u8, _lang: u16, builder: &'a mut DescriptorBuilder) -> Option<&'a [u8]> {
                     use usb::descriptor_type::{CONFIGURATION, DEVICE, BOS, STRING};
                     use $crate::usb_descriptors::{DEVICE_DESCRIPTOR, CONFIG_DESCRIPTOR, BOS_DESCRIPTOR, MANUFACTURER_STRING, STRING_MFG, STRING_PRODUCT, STRING_SERIAL};
-            
+
                     match (kind, index) {
                         (DEVICE, _) => Some(DEVICE_DESCRIPTOR),
                         (CONFIGURATION, 0) => Some(CONFIG_DESCRIPTOR),
@@ -301,7 +302,7 @@ macro_rules! viking{
                         _ => None,
                     }
                 }
-            
+
                 async fn set_configuration(&self, cfg: u8, usb: &mut Endpoints) -> Result<(), ()> {
                     if cfg == 1 {
                         self.set_interface(0, 0, usb).await
@@ -309,15 +310,15 @@ macro_rules! viking{
                         Err(())
                     }
                 }
-            
+
                 async fn set_interface(&self, intf: u8, alt: u8, usb: &mut Endpoints) -> Result<(), ()> {
                     let rt = self.rt;
                     if intf == 0 {
                         bulk_task(self.rt).cancel();
                         evt_task(self.rt).cancel();
-            
+
                         self.resources.borrow_mut().reset_all();
-            
+
                         if alt == 1 {
                             info!("Enabling interface");
                             let ep_out = usb.bulk_out::<EP_OUT>();
@@ -326,85 +327,85 @@ macro_rules! viking{
 
                             // usb.run never exits, so `self` lasts for static.
                             let resources = unsafe { core::mem::transmute::<&_, &'static _>(&self.resources) };
-                
+
                             bulk_task(self.rt).spawn(self.rt, resources, ep_out, ep_in);
-                            evt_task(self.rt).spawn(resources, ep_evt);
+                            evt_task(self.rt).spawn(self.rt, resources, ep_evt);
                         } else {
                             info!("Disabled interface");
                         }
-            
+
                         Ok(())
                     } else {
                         Err(())
                     }
                 }
-            
+
                 async fn handle_control<'a>(&self, req: Setup<'a>) -> Responded {
                     use zeptos::usb::ControlType::*;
                     use zeptos::usb::Recipient::*;
                     use zeptos::usb::ControlData::{In, Out};
-            
+
                     use $crate::usb_descriptors::{INTF_VIKING, MSOS_VENDOR_CODE, MSOS_DESCRIPTOR};
                     const I_VIKING: u16 = INTF_VIKING as u16;
-            
+
                     use viking_protocol::request::{DESCRIBE_RESOURCES, CONFIGURE_MODE};
 
                     match req {
                         Setup { ty: Vendor, recipient: Device, request: MSOS_VENDOR_CODE, index: 0x07, data: In(data), .. } => {
                             data.respond(&MSOS_DESCRIPTOR).await
                         }
-            
+
                         Setup { ty: Vendor, recipient: Interface, index: I_VIKING, request: DESCRIBE_RESOURCES, data: In(data), .. } => {
                             data.respond(VIKING_DESCRIPTOR).await
                         }
-            
+
                         Setup { ty: Vendor, recipient: Interface, index: I_VIKING, value, request: CONFIGURE_MODE, data: Out(data), .. } => {
                             let resource = (value >> 8) as u8;
                             let mode = (value & 0xff) as u8;
                             info!("configure {} {}", resource, mode);
-            
+
                             let ok = if let Ok(mut resources) = self.resources.try_borrow_mut() {
                                 resources.configure(resource, mode, &[]).is_ok()
                             } else {
                                 info!("resource busy");
                                 false
                             };
-            
+
                             if ok {
                                 data.accept().await
                             } else {
                                 data.reject()
                             }
                         }
-            
+
                         unknown => unknown.reject(),
                     }
                 }
             }
-            
+
             #[zeptos::task]
             async fn bulk_task(rt: Runtime, resources: &'static RefCell<Resources>, mut ep_out: zeptos::usb::Endpoint<Out, EP_OUT>, mut ep_in: zeptos::usb::Endpoint<In, EP_IN>) {
                 loop {
                     let buf_out = unsafe { &mut *addr_of_mut!(BULK_OUT_BUF) };
                     let buf_in = unsafe { &mut *addr_of_mut!(BULK_IN_BUF) };
-            
+
                     loop {
                         let len = ep_out.receive(buf_out).await;
                         info!("bulk read {}: {:?}", len, &buf_out[..len]);
-            
+
                         if len < 2 {
                             continue;
                         }
                         let sync = buf_out[0];
-            
+
                         let req = Reader::new(&buf_out[2..len]);
                         let mut res = Writer::new(&mut buf_in[..], 2);
-                        
+
                         let status = match resources.borrow().run(rt, req, &mut res).await {
                             Ok(_) => 0,
                             Err(_) => 1,
                         };
-                        
+
                         let response_len = res.offset();
                         buf_in[0] = sync;
                         buf_in[1] = status;
@@ -413,24 +414,24 @@ macro_rules! viking{
                     }
                 }
             }
-            
+
             #[zeptos::task]
-            async fn evt_task(resources: &'static RefCell<Resources>, ep_evt: zeptos::usb::Endpoint<In, EP_EVT>) {
+            async fn evt_task(rt: Runtime, resources: &'static RefCell<Resources>, ep_evt: zeptos::usb::Endpoint<In, EP_EVT>) {
                 let ep_evt = RefCell::new(ep_evt);
                 let mut buf_fill = &raw mut EVT_IN_BUF1;
                 let mut buf_send = &raw mut EVT_IN_BUF2;
-                
+
                 loop {
                     let mut transfer = pin!(Fuse::terminated());
                     let mut buf = Writer::new(unsafe { &mut (&mut *buf_fill)[..] }, 0);
-            
+
                     poll_fn(|cx| -> Poll<Infallible> {
                         //EVENT_CHANGE.subscribe(cx.waker());
                         resources.borrow().poll_all(cx.waker(), &mut buf);
-            
+
                         let _ = transfer.as_mut().poll(cx);
                         info!("Events: {:?} {} {:?}", buf_fill, buf.offset(), transfer.is_terminated());
-            
+
                         if transfer.is_terminated() && buf.offset() > 0 {
                             let len = buf.offset();
                             buf = Writer::new(unsafe { &mut (&mut *buf_send)[..] }, 0);
@@ -440,7 +441,7 @@ macro_rules! viking{
                             let _ = transfer.as_mut().poll(cx);
                             mem::swap(&mut buf_fill, &mut buf_send);
                         }
-            
+
                         Poll::Pending
                     }).await;
                 }
@@ -458,7 +459,7 @@ macro_rules! const_bytes {
                     $($inner)*
                 })
             }
-                
+
         }
     }
 }

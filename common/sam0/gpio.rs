@@ -1,6 +1,6 @@
 use core::{cell::Cell, marker::PhantomData, task::Waker};
 
-use zeptos::{Interrupt, TaskOnly, samd::gpio::{Alternate, TypePin}};
+use zeptos::{samd::gpio::{Alternate, TypePin}, Interrupt, Runtime, TaskOnly};
 use defmt::info;
 use viking_protocol::protocol::{gpio, led};
 use zeptos::samd::pac::{interrupt, EIC};
@@ -25,9 +25,9 @@ impl<P: TypePin> ResourceMode for Gpio<P> {
         P::dirclr();
     }
 
-    async fn command(&self, command: u8, _req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&self, _rt: Runtime, command: u8, _req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
         use viking_protocol::protocol::gpio::pin::cmd;
-        
+
         match command {
             cmd::FLOAT => {
                 P::dirclr();
@@ -74,9 +74,9 @@ impl<P: TypePin, const CH: u8> ResourceMode for LevelInterrupt<P, CH> {
         P::set_io();
     }
 
-    async fn command(&self, command: u8, _req: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&self, _rt: Runtime, command: u8, _req: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
         use viking_protocol::protocol::gpio::level_interrupt::cmd;
-        
+
         let (sense, event) = match command {
             cmd::WAIT_LOW => (Sense::LOW, None),
             cmd::WAIT_HIGH => (Sense::HIGH, None),
@@ -173,9 +173,9 @@ impl<P: TypePin, const ACTIVE: bool, const COLOR: u8> ResourceMode for Led<P, {A
         info!("led deinit");
     }
 
-    async fn command(&self, command: u8, _req: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&self, _rt: Runtime, command: u8, _req: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
         use viking_protocol::protocol::led::binary::cmd;
-        
+
         match command {
             cmd::OFF => {
                 if ACTIVE {

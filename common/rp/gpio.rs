@@ -1,6 +1,6 @@
 use core::marker::PhantomData;
 
-use zeptos::rp::gpio::*;
+use zeptos::{rp::gpio::*, Runtime};
 use defmt::info;
 use viking_protocol::protocol::{gpio, led};
 
@@ -24,7 +24,7 @@ impl<P: TypePin> ResourceMode for Gpio<P> {
         P::disable();
     }
 
-    async fn command(&self, command: u8, _buf: &mut Reader<'_>, response: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&self, _rt: Runtime, command: u8, _buf: &mut Reader<'_>, response: &mut Writer<'_>) -> Result<(), ()> {
         use viking_protocol::protocol::gpio::pin::cmd;
         
         match command {
@@ -174,7 +174,7 @@ impl<P: TypePin, const ACTIVE: bool, const COLOR: u8> ResourceMode for Led<P, {A
         P::disable();
     }
 
-    async fn command(&self, command: u8, _req: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&self, _rt: Runtime, command: u8, _req: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
         use viking_protocol::protocol::led::binary::cmd;
         
         match command {

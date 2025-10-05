@@ -5,6 +5,7 @@ use zeptos::samd::gpio:: AlternateFunc ;
 use defmt::{debug, info, Format};
 
 use viking_protocol::protocol::i2c;
+use zeptos::Runtime;
 
 use crate::{const_bytes, Reader, ResourceMode, Writer};
 use super::sercom::{ Sercom, DynSercom };
@@ -50,7 +51,7 @@ impl<S: Sercom> ResourceMode for SercomI2C<S> {
         deinit(DynSercom(S::NUM));
     }
 
-    async fn command(&self, command: u8, req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&self, _rt: Runtime, command: u8, req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
         use i2c::controller::cmd;
         let sercom = DynSercom(S::NUM);
         
