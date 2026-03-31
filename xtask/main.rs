@@ -1,4 +1,4 @@
-use std::{error::Error, fs, path::PathBuf, process::{exit, Command}};
+use std::{error::Error, fs, path::{self, PathBuf}, process::{exit, Command}};
 
 fn main() {
     let args = std::env::args().collect::<Vec<_>>();
@@ -24,13 +24,18 @@ fn boards() -> Result<Vec<(String, PathBuf)>, Box<dyn Error>> {
 
 fn dist() -> Result<(), Box<dyn Error>> {
     let mut failed = Vec::new();
+
+    let dist_dir = path::absolute("dist")?;
+
     for (board_name, path) in boards()? {
         println!("Building {board_name}");
-        
+
         let status = Command::new("cargo")
             .current_dir(path)
             .arg("build")
             .arg("--release")
+            .arg("-Zunstable-options")
+            .arg("--artifact-dir").arg(&dist_dir)
             .status();
 
         match status {
@@ -55,7 +60,7 @@ fn dist() -> Result<(), Box<dyn Error>> {
 fn clean() -> Result<(), Box<dyn Error>> {
     for (board_name, path) in boards()? {
         println!("Cleaning {board_name}");
-        
+
         let status = Command::new("cargo")
             .current_dir(path)
             .arg("clean")
