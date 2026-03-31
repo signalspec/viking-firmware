@@ -1,17 +1,17 @@
 [package]
-name = "viking-firmware-rp2040-pico"
+name = "viking-firmware-rp2350-pico2"
 version = "0.1.0"
 license = "MIT OR Apache-2.0"
 edition = "2024"
 
 [dependencies]
 cortex-m-rt = "0.7"
-zeptos = { version = "0.1", features = ["rp2040", "usb", "rp2040-boot2-w25q080"] }
-viking-firmware-common = { path = "../../common", features = ["rp2040"] }
+zeptos = { version = "0.1", features = ["rp2350", "usb" ] }
+viking-firmware-common = { path = "../../common", features = ["rp2350"] }
 defmt = "1.0.1"
 
 [[bin]]
-name = "viking-firmware-rp2040-pico"
+name = "viking-firmware-rp2350-pico2"
 path = "main.rs"
 test = false
 doctest = false

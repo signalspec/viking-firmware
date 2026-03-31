@@ -21,6 +21,7 @@ zeptos = { version = "0.1", features = ["usb", "time"] }
 samd11 = ["zeptos/samd11"]
 samd21 = ["zeptos/samd21"]
 rp2040 = ["zeptos/rp2040"]
+rp2350 = ["zeptos/rp2350"]
 
 [lib]
 path = "lib.rs"

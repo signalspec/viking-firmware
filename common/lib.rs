@@ -13,7 +13,7 @@ pub use buf::{Writer, Reader};
 #[doc(hidden)]
 pub mod usb_descriptors;
 
-#[cfg(feature = "rp2040")]
+#[cfg(any(feature = "rp2040", feature = "rp2350"))]
 pub mod rp;
 
 #[cfg(any(feature = "samd11", feature = "samd21"))]
