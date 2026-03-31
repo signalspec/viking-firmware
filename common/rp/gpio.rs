@@ -1,10 +1,14 @@
-use core::marker::PhantomData;
+use core::{cell::Cell, marker::PhantomData};
 
-use zeptos::{rp::gpio::*, Runtime};
-use defmt::info;
+use zeptos::{Runtime, TaskOnly, rp::gpio::*, task};
+use defmt::{debug, info};
 use viking_protocol::protocol::{gpio, led};
 
-use crate::common::{Writer, Reader, ResourceMode};
+use crate::common::{Writer, Reader, ResourceMode, Resource};
+
+pub fn init(rt: Runtime) {
+    gpio_interrupt_task(rt).spawn(rt);
+}
 
 pub struct Gpio<P>(PhantomData<P>);
 
@@ -52,105 +56,94 @@ impl<P: TypePin> ResourceMode for Gpio<P> {
     }
 }
 
-/*
-pub struct LevelInterrupt<P, const CH: u8>{
+pub struct LevelInterrupt<P>{
     _p: PhantomData<P>,
-    event: Cell<Option<bool>>,
 }
 
-impl<P: TypePin, const CH: u8> ResourceMode for LevelInterrupt<P, CH> {
+impl<P: TypePin> ResourceMode for LevelInterrupt<P> {
     const PROTOCOL: u16 = gpio::level_interrupt::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
-    fn init(_config: &[u8]) -> Result<Self, ()> {
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
         info!("level_interrupt init {}", P::DYN.pin);
         P::set_function(Function::F5);
-        Ok(LevelInterrupt { _p: PhantomData, event: Cell::new(None) })
+        Ok(LevelInterrupt { _p: PhantomData })
     }
 
-    fn deinit(self) {
+    fn deinit(self, resource: Resource) {
         info!("level_interrupt deinit");
+        GPIO_INT_STATE.get(resource.rt)[P::DYN.pin as usize].set(EventWatch::None);
         P::disable();
     }
 
-    async fn command(&self, command: u8, _buf: &mut &[u8], _response: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&self, resource: Resource, command: u8, _buf: &mut Reader<'_>, _response: &mut Writer<'_>) -> Result<(), ()> {
+        let rt = resource.rt();
         use viking_protocol::protocol::gpio::level_interrupt::cmd;
 
-        let (sense, event) = match command {
-            cmd::WAIT_LOW => (Sense::LOW, None),
-            cmd::WAIT_HIGH => (Sense::HIGH, None),
-            cmd::EVT_LOW => (Sense::LOW, Some(false)),
-            cmd::EVT_HIGH => (Sense::HIGH, Some(true)),
+        match command {
+            cmd::WAIT_LOW => {
+                P::DYN.wait_level(rt, false).await;
+            }
+            cmd::WAIT_HIGH => {
+                P::DYN.wait_level(rt, true).await;
+            }
+            cmd::EVT_LOW => {
+                GPIO_INT_STATE.get(rt)[P::DYN.pin as usize].set(EventWatch::LevelLow(resource));
+                gpio_interrupt_task(rt).wake();
+             }
+            cmd::EVT_HIGH => {
+                GPIO_INT_STATE.get(rt)[P::DYN.pin as usize].set(EventWatch::LevelHigh(resource));
+                gpio_interrupt_task(rt).wake();
+            }
             _ => return Err(())
         };
 
-        configure_interrupt(CH, sense);
-        self.event.set(event);
-
-        if event.is_none() {
-            wait_interrupt(CH).await;
-        } else {
-            //EVENT_CHANGE.notify();
-        }
-
         Ok(())
     }
+}
 
-    fn poll_event(&self, waker: &Waker, resource: u8, buf: &mut Writer<'_>) {
-        if let Some(level) = self.event.get() {
-            let eic = unsafe { EIC::steal() };
-            if eic.intflag.read().bits() & (1<<CH) != 0 {
-                if buf.put(resource | ((level as u8) << 6)).is_ok() {
-                    self.event.set(None);
+static GPIO_INT_STATE: TaskOnly<[Cell<EventWatch>; 30]> = unsafe { TaskOnly::new_unsend([const { Cell::new(EventWatch::None) }; 30]) };
+
+#[derive(Copy, Clone)]
+enum EventWatch {
+    None,
+    LevelLow(Resource),
+    LevelHigh(Resource),
+}
+
+#[task]
+async fn gpio_interrupt_task(rt: Runtime) {
+    zeptos::rp::gpio::BANK0_INT.get_pinned(rt).until(|| {
+        for (i, state) in GPIO_INT_STATE.get(rt).iter().enumerate() {
+            let pin = zeptos::rp::gpio::IoPin::bank0(i as u8);
+            match state.get() {
+                EventWatch::None => {},
+                EventWatch::LevelLow(r) => {
+                    let status = pin.interrupt_status();
+                    debug!("gpio{} polling for level low: {:04b}", i, status.bits());
+                    if status.contains(EventMask::LOW) {
+                        r.send_event(gpio::level_interrupt::evt::LOW);
+                        state.set(EventWatch::None);
+                    } else {
+                        pin.enable_interrupts(EventMask::LOW);
+                    }
                 }
-            } else {
-                unsafe { INT.get_unchecked() }.subscribe(waker);
+                EventWatch::LevelHigh(r) => {
+                    let status = pin.interrupt_status();
+                    debug!("gpio{} polling for level high: {:04b}", i, status.bits());
+                    if status.contains(EventMask::HIGH) {
+                        r.send_event(gpio::level_interrupt::evt::HIGH);
+                        state.set(EventWatch::None);
+                    } else {
+                        pin.enable_interrupts(EventMask::HIGH);
+                    }
+                },
             }
         }
-    }
-}
 
-type Sense = zeptos::rp::pac::io::Int;
-
-fn configure_interrupt(ch: u8, sense: Sense) {
-    let eic = unsafe { EIC::steal() };
-    eic.config[if ch > 7 { 1 } else { 0 }].modify(|_, w| {
-        unsafe {
-            match ch & 0b111 {
-                0 => w.sense0().bits(sense as u8),
-                1 => w.sense1().bits(sense as u8),
-                2 => w.sense2().bits(sense as u8),
-                3 => w.sense3().bits(sense as u8),
-                4 => w.sense4().bits(sense as u8),
-                5 => w.sense5().bits(sense as u8),
-                6 => w.sense6().bits(sense as u8),
-                7 => w.sense7().bits(sense as u8),
-                _ => unreachable!(),
-            }
-        }
-    });
-    eic.intflag.write(|w| unsafe { w.bits(1 << ch) });
-    eic.intenset.write(|w| unsafe { w.bits(1 << ch) });
-}
-
-async fn wait_interrupt(ch: u8) {
-    let eic = unsafe { EIC::steal() };
-    scopeguard::defer! {
-        eic.intenclr.write(|w| unsafe { w.bits(1 << ch) });
-    };
-    unsafe { INT.get_unchecked() }.until(|| {
-        eic.intflag.read().bits() & (1<<ch) != 0
+        false
     }).await;
 }
-
-static INT: TaskOnly<Interrupt> = unsafe { TaskOnly::new(Interrupt::new()) };
-
-#[interrupt]
-fn IO_IRQ_BANK0() {
-    unsafe { INT.get_unchecked().notify(); }
-}
-
-*/
 
 pub struct Led<P, const ACTIVE: bool, const COLOR: u8>(PhantomData<P>);
 

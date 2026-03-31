@@ -8,7 +8,8 @@ pub struct Platform {
 }
 
 impl Platform {
-    pub fn new(_rt: zeptos::Runtime, hw: zeptos::Hardware) -> (Usb, Platform) {
+    pub fn new(rt: zeptos::Runtime, hw: zeptos::Hardware) -> (Usb, Platform) {
+        gpio::init(rt);
         (hw.usb, Platform {})
     }
 }
