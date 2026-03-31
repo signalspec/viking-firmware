@@ -1,11 +1,11 @@
 use core::{cell::Cell, marker::PhantomData, task::Waker};
 
-use zeptos::{samd::gpio::{Alternate, TypePin}, Interrupt, Runtime, TaskOnly};
+use zeptos::{Runtime, samd::gpio::{Alternate, TypePin}, Interrupt, TaskOnly};
 use defmt::info;
 use viking_protocol::protocol::{gpio, led};
 use zeptos::samd::pac::{interrupt, EIC};
 
-use crate::common::{Reader, ResourceMode, Writer};
+use crate::common::{Reader, Resource, ResourceMode, Writer};
 
 pub struct Gpio<P>(PhantomData<P>);
 
@@ -13,19 +13,19 @@ impl<P: TypePin> ResourceMode for Gpio<P> {
     const PROTOCOL: u16 = gpio::pin::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
-    fn init(_config: &[u8]) -> Result<Self, ()> {
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
         info!("gpio init {:?} {:?}", P::DYN.group, P::DYN.pin);
         P::pincfg().write(|w| w.inen().set_bit());
         P::enable_sampling();
         Ok(Gpio(PhantomData))
     }
 
-    fn deinit(self) {
+    fn deinit(self, _resource: Resource) {
         info!("gpio deinit");
         P::dirclr();
     }
 
-    async fn command(&self, _rt: Runtime, command: u8, _req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&self, _resource: Resource, command: u8, _req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
         use viking_protocol::protocol::gpio::pin::cmd;
 
         match command {
@@ -56,26 +56,36 @@ impl<P: TypePin> ResourceMode for Gpio<P> {
 
 pub struct LevelInterrupt<P, const CH: u8>{
     _p: PhantomData<P>,
-    event: Cell<Option<bool>>,
 }
 
 impl<P: TypePin, const CH: u8> ResourceMode for LevelInterrupt<P, CH> {
     const PROTOCOL: u16 = gpio::level_interrupt::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
-    fn init(_config: &[u8]) -> Result<Self, ()> {
+    fn init(resource: Resource, _config: &[u8]) -> Result<Self, ()> {
+        let rt = resource.rt;
         info!("level_interrupt init {:?} {:?}", P::DYN.group, P::DYN.pin);
         P::set_alternate(Alternate::A);
-        Ok(LevelInterrupt { _p: PhantomData, event: Cell::new(None) })
+        let state = &GPIO_INT_STATE.get(rt)[CH as usize];
+
+        if !matches!(state.get(), EventWatch::Free) {
+            return Err(());
+        }
+
+        state.set(EventWatch::Idle);
+        Ok(LevelInterrupt { _p: PhantomData })
     }
 
-    fn deinit(self) {
+    fn deinit(self, resource: Resource) {
+        let rt = resource.rt;
         info!("level_interrupt deinit");
+        GPIO_INT_STATE.get(rt)[CH as usize].set(EventWatch::Free);
         P::set_io();
     }
 
-    async fn command(&self, _rt: Runtime, command: u8, _req: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&self, resource: Resource, command: u8, _req: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
         use viking_protocol::protocol::gpio::level_interrupt::cmd;
+        let rt = resource.rt;
 
         let (sense, event) = match command {
             cmd::WAIT_LOW => (Sense::LOW, None),
@@ -86,32 +96,28 @@ impl<P: TypePin, const CH: u8> ResourceMode for LevelInterrupt<P, CH> {
         };
 
         configure_interrupt(CH, sense);
-        self.event.set(event);
 
-        if event.is_none() {
-            wait_interrupt(CH).await;
+        if let Some(event) = event {
+            GPIO_INT_STATE.get(rt)[CH as usize].set(EventWatch::Level(event, resource));
+            enable_interrupt(CH);
         } else {
-            //EVENT_CHANGE.notify();
+            wait_interrupt(rt, CH).await;
         }
 
         Ok(())
     }
-
-    fn poll_event(&self, waker: &Waker, resource: u8, buf: &mut Writer<'_>) {
-        if let Some(level) = self.event.get() {
-            let eic = unsafe { EIC::steal() };
-            if eic.intflag.read().bits() & (1<<CH) != 0 {
-                if buf.put(resource | ((level as u8) << 6)).is_ok() {
-                    self.event.set(None);
-                }
-            } else {
-                unsafe { INT.get_unchecked() }.subscribe(waker);
-            }
-        }
-    }
 }
 
 type Sense = zeptos::samd::pac::eic::config::SENSE0SELECT_A;
+
+static GPIO_INT_STATE: TaskOnly<[Cell<EventWatch>; 16]> = unsafe { TaskOnly::new_unsend([const { Cell::new(EventWatch::Free) }; 16]) };
+
+#[derive(Clone, Copy)]
+enum EventWatch {
+    Free,
+    Idle,
+    Level(bool, Resource),
+}
 
 fn configure_interrupt(ch: u8, sense: Sense) {
     let eic = unsafe { EIC::steal() };
@@ -130,24 +136,52 @@ fn configure_interrupt(ch: u8, sense: Sense) {
             }
         }
     });
+}
+
+fn enable_interrupt(ch: u8) {
+    let eic = unsafe { EIC::steal() };
     eic.intflag.write(|w| unsafe { w.bits(1 << ch) });
     eic.intenset.write(|w| unsafe { w.bits(1 << ch) });
 }
 
-async fn wait_interrupt(ch: u8) {
+async fn wait_interrupt(rt: Runtime, ch: u8) {
     let eic = unsafe { EIC::steal() };
-    scopeguard::defer! {
-        eic.intenclr.write(|w| unsafe { w.bits(1 << ch) });
-    };
-    unsafe { INT.get_unchecked() }.until(|| {
-        eic.intflag.read().bits() & (1<<ch) != 0
+    INT.get(rt).until(|| {
+        if eic.intflag.read().bits() & (1<<ch) == 0 {
+            enable_interrupt(ch);
+            false
+        } else {
+            true
+        }
     }).await;
 }
-static INT: TaskOnly<Interrupt> = unsafe { TaskOnly::new(Interrupt::new()) };
+
+static INT: TaskOnly<Interrupt> = TaskOnly::new(Interrupt::new());
 
 #[interrupt]
 fn EIC() {
-    let _eic = unsafe { EIC::steal() };
+    use viking_protocol::protocol::gpio::level_interrupt::evt;
+    let eic = unsafe { EIC::steal() };
+    eic.intenclr.write(|w| unsafe { w.bits(0xff) });
+
+    let flags = eic.intflag.read().bits();
+    let states = unsafe { GPIO_INT_STATE.get_unchecked() };
+    for (ch, state) in states.iter().enumerate() {
+        match state.get() {
+            EventWatch::Free | EventWatch::Idle => {}
+            EventWatch::Level(level, resource) => {
+                defmt::debug!("Polling GPIO IRQ {} for level {} in {:016b}", ch, level, flags);
+                if flags & (1<<ch) != 0 {
+                    resource.send_event(if level { evt::HIGH } else { evt::LOW });
+                    state.set(EventWatch::Idle);
+                } else {
+                    enable_interrupt(ch as u8);
+                }
+            }
+        }
+
+    }
+
     unsafe { INT.get_unchecked().notify(); }
 }
 
@@ -157,7 +191,7 @@ impl<P: TypePin, const ACTIVE: bool, const COLOR: u8> ResourceMode for Led<P, {A
     const PROTOCOL: u16 = led::binary::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[COLOR];
 
-    fn init(_config: &[u8]) -> Result<Self, ()> {
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
         info!("led init {:?} {:?}", P::DYN.group, P::DYN.pin);
         if ACTIVE {
             P::outset();
@@ -168,12 +202,12 @@ impl<P: TypePin, const ACTIVE: bool, const COLOR: u8> ResourceMode for Led<P, {A
         Ok(Led(PhantomData))
     }
 
-    fn deinit(self) {
+    fn deinit(self, _resource: Resource) {
         P::dirclr();
         info!("led deinit");
     }
 
-    async fn command(&self, _rt: Runtime, command: u8, _req: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&self, _resource: Resource, command: u8, _req: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
         use viking_protocol::protocol::led::binary::cmd;
 
         match command {

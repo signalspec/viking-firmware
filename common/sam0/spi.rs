@@ -1,12 +1,12 @@
 use core::marker::PhantomData;
 
-use zeptos::{samd::gpio::{AlternateFunc, TypePin}, Runtime};
+use zeptos::{samd::gpio::{AlternateFunc, TypePin}};
 use defmt::info;
 
 use viking_protocol::{protocol::spi, U32};
 
 use crate::const_bytes;
-use crate::common::{Reader, ResourceMode, Writer};
+use crate::common::{Reader, Resource, ResourceMode, Writer};
 use super::sercom::{ DynSercom, Sercom };
 
 pub struct SercomSPI<S, const DOPO: u8, const DIPO: u8> {
@@ -28,18 +28,18 @@ impl<S: Sercom, const DOPO: u8, const DIPO: u8> ResourceMode for SercomSPI<S, DO
         )
     };
 
-    fn init(_config: &[u8]) -> Result<Self, ()> {
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
         info!("spi init");
         init(DynSercom(S::NUM), DOPO, DIPO);
         Ok(SercomSPI { _p: PhantomData })
     }
 
-    fn deinit(self) {
+    fn deinit(self, _resource: Resource) {
         info!("spi deinit");
         deinit(DynSercom(S::NUM));
     }
 
-    async fn command(&self, _rt: Runtime, command: u8, req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&self, _resource: Resource, command: u8, req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
         use spi::controller::cmd;
         let sercom = DynSercom(S::NUM);
 
@@ -59,13 +59,13 @@ impl<P: TypePin, S: Sercom, M: AlternateFunc> ResourceMode for SercomSCKPin<P, S
     const PROTOCOL: u16 = spi::sck_pin::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
-    fn init(_config: &[u8]) -> Result<Self, ()> {
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
         info!("sercom SCK init {:?} {:?}", P::DYN.group, P::DYN.pin);
         P::set_alternate(M::DYN);
         Ok(Self(PhantomData))
     }
 
-    fn deinit(self) {
+    fn deinit(self, _resource: Resource) {
         P::set_io();
     }
 }
@@ -76,13 +76,13 @@ impl<P: TypePin, S, M: AlternateFunc> ResourceMode for SercomSDOPin<P, S, M> {
     const PROTOCOL: u16 = spi::sdo_pin::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
-    fn init(_config: &[u8]) -> Result<Self, ()> {
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
         info!("sercom SDO init {:?} {:?}", P::DYN.group, P::DYN.pin);
         P::set_alternate(M::DYN);
         Ok(Self(PhantomData))
     }
 
-    fn deinit(self) {
+    fn deinit(self, _resource: Resource) {
         P::set_io();
     }
 }
@@ -93,13 +93,13 @@ impl<P: TypePin, S, M: AlternateFunc> ResourceMode for SercomSDIPin<P, S, M> {
     const PROTOCOL: u16 = spi::sdi_pin::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
-    fn init(_config: &[u8]) -> Result<Self, ()> {
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
         info!("sercom SDI init {:?} {:?}", P::DYN.group, P::DYN.pin);
         P::set_alternate(M::DYN);
         Ok(Self(PhantomData))
     }
 
-    fn deinit(self) {
+    fn deinit(self, _resource: Resource) {
         P::set_io();
     }
 }

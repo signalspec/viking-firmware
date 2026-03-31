@@ -1,22 +1,17 @@
-use core::task::Waker;
-
-use zeptos::Runtime;
-use super::{Reader, Writer};
+use super::{Reader, Writer, Resource};
 
 pub trait ResourceMode: Sized {
     const PROTOCOL: u16;
     const DESCRIPTOR: &'static [u8];
 
-    fn init(config: &[u8]) -> Result<Self, ()>;
+    fn init(_resource: Resource, config: &[u8]) -> Result<Self, ()>;
 
-    fn deinit(self);
+    fn deinit(self, _resource: Resource);
 
     #[allow(async_fn_in_trait)]
-    async fn command(&self, _rt: Runtime, _cmd: u8, _buf: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&self, _resource: Resource, _cmd: u8, _buf: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
         Err(())
     }
-
-    fn poll_event(&self, _waker: &Waker, _resource: u8, _buf: &mut Writer<'_>) {}
 }
 
 #[macro_export]
@@ -38,11 +33,12 @@ macro_rules! viking{
                 }
 
                 impl $resource_name {
-                    pub fn deinit(self) {
+                    pub fn deinit(self, resource: crate::common::Resource) {
+                        #![allow(unused_variables)]
                         #[allow(unused_imports)]
                         use crate::common::resources::ResourceMode;
                         match self {
-                            $(Self::$mode_name(s) => s.deinit(),)*
+                            $(Self::$mode_name(s) => s.deinit(resource),)*
                         }
                     }
                 }
@@ -143,14 +139,16 @@ macro_rules! viking{
                 }
             }
 
-            fn configure(&mut self, resource: u8, mode: u8, config: &[u8]) -> Result<(), ()> {
+            fn configure(&mut self, resource: crate::common::Resource, mode: u8, config: &[u8]) -> Result<(), ()> {
                 #![allow(unreachable_code)]
-                match resource {
+                match resource.id() {
                     $(
                         res_id if res_id == const { ${index()} + 1 } => {
-                            if let Some(r) = self.$resource_name.take() { r.deinit() }
+                            if let Some(r) = self.$resource_name.take() { r.deinit(resource) }
                             self.$resource_name = Some(match mode {
-                                $(mode_id if mode_id == const { ${index()} + 1 } => resources::$resource_name::$mode_name(<$mode_ty as crate::common::resources::ResourceMode>::init(config)?),)*
+                                $(mode_id if mode_id == const { ${index()} + 1 } => {
+                                    resources::$resource_name::$mode_name(<$mode_ty as crate::common::resources::ResourceMode>::init(resource, config)?)
+                                })*
                                 _ => return Err(())
                             });
                             Ok(())
@@ -160,35 +158,23 @@ macro_rules! viking{
                 }
             }
 
-            fn reset_all(&mut self) {
+            fn reset_all(&mut self, rt: zeptos::Runtime) {
                 $(
-                    if let Some(r) = self.$resource_name.take() { r.deinit() }
+                    if let Some(r) = self.$resource_name.take() { r.deinit(crate::common::Resource { id: const { ${index()} + 1 }, rt }) }
                 )*
             }
 
-            async fn command(&self, rt: zeptos::Runtime, resource: u8, command: u8, req: &mut crate::common::Reader<'_>, res: &mut crate::common::Writer<'_>) -> Result<(), ()> {
+            async fn command(&self, resource: crate::common::Resource, command: u8, req: &mut crate::common::Reader<'_>, res: &mut crate::common::Writer<'_>) -> Result<(), ()> {
                 use crate::common::resources::ResourceMode;
-                match resource {
+                match resource.id() {
                     $(
                         res_id if res_id == const { ${index()} + 1 } => match &self.$resource_name {
-                            $(Some(resources::$resource_name::$mode_name(s)) => s.command(rt, command, req, res).await,)*
+                            $(Some(resources::$resource_name::$mode_name(s)) => s.command(resource, command, req, res).await,)*
                             _ => Err(())
                         }
                     )*
                     _ => Err(())
                 }
-            }
-
-            fn poll_all(&self, waker: &core::task::Waker, buf: &mut crate::common::Writer) {
-                use crate::common::resources::ResourceMode;
-                $(
-                    #[allow(unused_variables)]
-                    let res_id = const { ${index()} + 1 };
-                    match &self.$resource_name {
-                        $(Some(resources::$resource_name::$mode_name(s)) => s.poll_event(waker, res_id, buf),)*
-                        _ => {}
-                    }
-                )*
             }
         }
     }

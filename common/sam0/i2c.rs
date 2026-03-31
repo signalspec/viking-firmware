@@ -5,10 +5,9 @@ use zeptos::samd::gpio:: AlternateFunc ;
 use defmt::{debug, info, Format};
 
 use viking_protocol::protocol::i2c;
-use zeptos::Runtime;
 
 use crate::const_bytes;
-use crate::common::{Reader, ResourceMode, Writer};
+use crate::common::{Reader, Resource, ResourceMode, Writer};
 use super::sercom::{ Sercom, DynSercom };
 
 #[derive(Clone, Copy, Debug, PartialEq, Format)]
@@ -41,18 +40,18 @@ impl<S: Sercom> ResourceMode for SercomI2C<S> {
         )
     };
 
-    fn init(_config: &[u8]) -> Result<Self, ()> {
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
         info!("i2c init");
         init(DynSercom(S::NUM));
         Ok(SercomI2C { _p: PhantomData, state: Cell::new(State::Idle) })
     }
 
-    fn deinit(self) {
+    fn deinit(self, _resource: Resource) {
         info!("i2c deinit");
         deinit(DynSercom(S::NUM));
     }
 
-    async fn command(&self, _rt: Runtime, command: u8, req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&self, _resource: Resource, command: u8, req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
         use i2c::controller::cmd;
         let sercom = DynSercom(S::NUM);
 
@@ -92,13 +91,13 @@ impl<P: TypePin, S: Sercom, M: AlternateFunc> ResourceMode for SercomSCLPin<P, S
     const PROTOCOL: u16 = i2c::scl::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
-    fn init(_config: &[u8]) -> Result<Self, ()> {
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
         info!("sercom SCL init {:?} {:?}", P::DYN.group, P::DYN.pin);
         P::set_alternate(M::DYN);
         Ok(Self(PhantomData))
     }
 
-    fn deinit(self) {
+    fn deinit(self, _resource: Resource) {
         P::set_io();
     }
 }
@@ -109,13 +108,13 @@ impl<P: TypePin, S, M: AlternateFunc> ResourceMode for SercomSDAPin<P, S, M> {
     const PROTOCOL: u16 = i2c::sda::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
-    fn init(_config: &[u8]) -> Result<Self, ()> {
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
         info!("sercom SDA init {:?} {:?}", P::DYN.group, P::DYN.pin);
         P::set_alternate(M::DYN);
         Ok(Self(PhantomData))
     }
 
-    fn deinit(self) {
+    fn deinit(self, _resource: Resource) {
         P::set_io();
     }
 }

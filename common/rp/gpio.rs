@@ -12,19 +12,19 @@ impl<P: TypePin> ResourceMode for Gpio<P> {
     const PROTOCOL: u16 = gpio::pin::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
-    fn init(_config: &[u8]) -> Result<Self, ()> {
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
         info!("gpio{} init", P::DYN.pin);
         P::set_function(Function::F5);
         Ok(Gpio(PhantomData))
     }
 
-    fn deinit(self) {
+    fn deinit(self, _resource: Resource) {
         info!("gpio{} deinit", P::DYN.pin);
         P::oe_clr();
         P::disable();
     }
 
-    async fn command(&self, _rt: Runtime, command: u8, _buf: &mut Reader<'_>, response: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&self, _resource: Resource, command: u8, _buf: &mut Reader<'_>, response: &mut Writer<'_>) -> Result<(), ()> {
         use viking_protocol::protocol::gpio::pin::cmd;
 
         match command {
@@ -158,7 +158,7 @@ impl<P: TypePin, const ACTIVE: bool, const COLOR: u8> ResourceMode for Led<P, {A
     const PROTOCOL: u16 = led::binary::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[COLOR];
 
-    fn init(_config: &[u8]) -> Result<Self, ()> {
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
         P::set_function(Function::F5);
         if ACTIVE {
             P::out_set();
@@ -169,12 +169,12 @@ impl<P: TypePin, const ACTIVE: bool, const COLOR: u8> ResourceMode for Led<P, {A
         Ok(Led(PhantomData))
     }
 
-    fn deinit(self) {
+    fn deinit(self, _resource: Resource) {
         P::oe_clr();
         P::disable();
     }
 
-    async fn command(&self, _rt: Runtime, command: u8, _req: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&self, _resource: Resource, command: u8, _req: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
         use viking_protocol::protocol::led::binary::cmd;
 
         match command {

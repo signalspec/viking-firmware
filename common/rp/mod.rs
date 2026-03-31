@@ -1,7 +1,7 @@
 use zeptos::usb::Usb;
 
 mod gpio;
-pub use gpio::{Gpio, Led};
+pub use gpio::{Gpio, LevelInterrupt, Led};
 
 pub struct Platform {
 

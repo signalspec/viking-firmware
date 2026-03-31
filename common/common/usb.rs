@@ -2,7 +2,7 @@ use defmt::info;
 use futures_util::future::{Fuse, FusedFuture, FutureExt};
 use zeptos::usb::{UsbBuffer, In, Out, Endpoints, Setup, Responded};
 use zeptos::usb::descriptors::{DescriptorBuilder, LANGUAGE_LIST_US_ENGLISH};
-use zeptos::Runtime;
+use zeptos::{Runtime, TaskOnly};
 use core::cell::RefCell;
 use core::future::poll_fn;
 use core::convert::Infallible;
@@ -11,7 +11,7 @@ use core::mem;
 use core::pin::pin;
 use core::ptr::addr_of_mut;
 
-use crate::common::{Reader, Writer};
+use crate::common::{Reader, Resource, Writer};
 
 // Board-specific configuration defined at the root of the crate
 use crate::{CMD_BUF_SIZE, RES_BUF_SIZE, EVT_BUF_SIZE, PRODUCT_STRING, VIKING_DESCRIPTOR, Resources, Platform};
@@ -58,7 +58,8 @@ impl zeptos::usb::Handler for Handler{
             bulk_task(self.rt).cancel();
             evt_task(self.rt).cancel();
 
-            self.resources.borrow_mut().reset_all();
+            self.resources.borrow_mut().reset_all(self.rt);
+            EVENT_STATE.get(self.rt).replace(EventState::empty());
 
             if alt == 1 {
                 info!("Enabling interface");
@@ -69,8 +70,9 @@ impl zeptos::usb::Handler for Handler{
                 // usb.run never exits, so `self` lasts for static.
                 let resources = unsafe { core::mem::transmute::<&_, &'static _>(&self.resources) };
 
+                EVENT_STATE.get(self.rt).replace(EventState::new(unsafe { &raw mut EVT_IN_BUF1.0 as *mut [u8] }));
+                evt_task(self.rt).spawn(self.rt, ep_evt);
                 bulk_task(self.rt).spawn(self.rt, resources, ep_out, ep_in);
-                evt_task(self.rt).spawn(self.rt, resources, ep_evt);
             } else {
                 info!("Disabled interface");
             }
@@ -101,9 +103,10 @@ impl zeptos::usb::Handler for Handler{
             }
 
             Setup { ty: Vendor, recipient: Interface, index: I_VIKING, value, request: CONFIGURE_MODE, data: Out(data), .. } => {
-                let resource = (value >> 8) as u8;
+                let id = (value >> 8) as u8;
                 let mode = (value & 0xff) as u8;
-                info!("configure {} {}", resource, mode);
+                let resource = Resource { id, rt: self.rt };
+                info!("configure {} {}", id, mode);
 
                 let ok = if let Ok(mut resources) = self.resources.try_borrow_mut() {
                     resources.configure(resource, mode, &[]).is_ok()
@@ -165,9 +168,10 @@ async fn run_cmds(rt: Runtime, resources: &mut Resources, mut req: Reader<'_>, r
                 rt.delay_us(us).await;
             }
             byte => {
-                let resource = byte & ((1 << 6) - 1);
+                let id = byte & ((1 << 6) - 1);
                 let command = byte >> 6;
-                resources.command(rt, resource, command, &mut req, res).await?;
+                let resource = Resource { id, rt };
+                resources.command(resource, command, &mut req, res).await?;
             }
         }
     }
@@ -175,31 +179,89 @@ async fn run_cmds(rt: Runtime, resources: &mut Resources, mut req: Reader<'_>, r
     Ok(())
 }
 
+pub struct EventState {
+    // Buffer is valid, but cannot be held across an await because it may be swapped out by the event USB task.
+    evt_buf: *mut [u8],
+    write_pos: usize,
+    last_start: usize,
+    overflowed: bool,
+}
+
+impl EventState {
+    const fn new(evt_buf: *mut [u8]) -> Self {
+        Self {
+            evt_buf,
+            write_pos: 0,
+            last_start: 0,
+            overflowed: false,
+        }
+    }
+
+    const fn empty() -> Self {
+        Self::new(&mut [])
+    }
+
+    pub fn put(&mut self, event: u8) {
+        let buf = unsafe { &mut *self.evt_buf };
+        if self.write_pos < buf.len() {
+            buf[self.write_pos] = event;
+            self.last_start = self.write_pos;
+            self.write_pos += 1;
+        } else {
+            self.overflowed = true;
+        }
+    }
+
+    pub fn put_var_len(&mut self, event: u8, byte: u8) {
+        let buf = unsafe { &mut *self.evt_buf };
+
+        if self.last_start < self.write_pos
+        && buf[self.last_start] == event
+        && buf[self.last_start + 1] != 255
+        && self.write_pos < buf.len() {
+            // Append to last event
+            buf[self.last_start + 1] += 1;
+            buf[self.write_pos] = byte;
+            self.write_pos += 1;
+        } else if self.write_pos + 2 < buf.len() {
+            buf[self.write_pos] = event;
+            buf[self.write_pos + 1] = 1;
+            buf[self.write_pos + 2] = byte;
+            self.last_start = self.write_pos;
+            self.write_pos += 3;
+        } else {
+            self.overflowed = true;
+        }
+    }
+}
+
+pub(in super) static EVENT_STATE: TaskOnly<RefCell<EventState>> = unsafe { TaskOnly::new_unsend(RefCell::new(EventState::empty())) };
+pub(in super) fn wake_event_task(rt: Runtime) {
+    evt_task(rt).wake();
+}
+
 #[zeptos::task]
-async fn evt_task(_rt: Runtime, resources: &'static RefCell<Resources>, ep_evt: zeptos::usb::Endpoint<In, EP_EVT>) {
+async fn evt_task(rt: Runtime, ep_evt: zeptos::usb::Endpoint<In, EP_EVT>) {
     let ep_evt = RefCell::new(ep_evt);
     let mut buf_fill = &raw mut EVT_IN_BUF1;
     let mut buf_send = &raw mut EVT_IN_BUF2;
 
     loop {
         let mut transfer = pin!(Fuse::terminated());
-        let mut buf = Writer::new(unsafe { &mut (&mut *buf_fill)[..] }, 0);
 
         poll_fn(|cx| -> Poll<Infallible> {
-            //EVENT_CHANGE.subscribe(cx.waker());
-            resources.borrow().poll_all(cx.waker(), &mut buf);
-
+            let mut state = EVENT_STATE.get(rt).borrow_mut();
             let _ = transfer.as_mut().poll(cx);
-            info!("Events: {:?} {} {:?}", buf_fill, buf.offset(), transfer.is_terminated());
+            info!("Events: buf={:?} pos={} tx_done={:?}", buf_fill, state.write_pos, transfer.is_terminated());
 
-            if transfer.is_terminated() && buf.offset() > 0 {
-                let len = buf.offset();
-                buf = Writer::new(unsafe { &mut (&mut *buf_send)[..] }, 0);
-                info!("Sending events: {}", len);
+            if transfer.is_terminated() && state.write_pos > 0 {
+                let len = state.write_pos;
+                info!("Sending events: {} bytes", len);
                 let mut ep_evt = ep_evt.borrow_mut();
                 transfer.set(async move { ep_evt.send(unsafe { &mut *buf_fill }, len, true).await }.fuse());
                 let _ = transfer.as_mut().poll(cx);
                 mem::swap(&mut buf_fill, &mut buf_send);
+                *state = EventState::new(unsafe { &raw mut (*buf_fill).0 });
             }
 
             Poll::Pending
