@@ -406,7 +406,6 @@ dependencies = [
  "defmt-rtt",
  "futures-util",
  "panic-probe",
- "pin-project-lite",
  "scopeguard",
  "usb",
  "viking-protocol",
