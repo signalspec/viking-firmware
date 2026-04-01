@@ -12,7 +12,3 @@ impl Platform {
         (hw.usb, Platform {})
     }
 }
-
-impl crate::Platform for Platform {
-
-}

@@ -419,7 +419,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77439c1b53d2303b20d9459b1ade71a83c716e3f9c34f3228c00e6f185d6c002"
 
 [[package]]
-name = "viking-firmware-common"
+name = "viking-firmware-rp2040-pico"
 version = "0.1.0"
 dependencies = [
  "cortex-m",
@@ -428,19 +428,8 @@ dependencies = [
  "defmt-rtt",
  "futures-util",
  "panic-probe",
- "scopeguard",
  "usb",
  "viking-protocol",
- "zeptos",
-]
-
-[[package]]
-name = "viking-firmware-rp2040-pico"
-version = "0.1.0"
-dependencies = [
- "cortex-m-rt",
- "defmt",
- "viking-firmware-common",
  "zeptos",
 ]
 

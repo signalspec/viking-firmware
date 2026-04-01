@@ -5,7 +5,7 @@ use defmt::info;
 use viking_protocol::protocol::{gpio, led};
 use zeptos::samd::pac::{interrupt, EIC};
 
-use crate::{Reader, ResourceMode, Writer};
+use crate::common::{Reader, ResourceMode, Writer};
 
 pub struct Gpio<P>(PhantomData<P>);
 

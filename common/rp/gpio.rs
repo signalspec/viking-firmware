@@ -4,7 +4,7 @@ use zeptos::{rp::gpio::*, Runtime};
 use defmt::info;
 use viking_protocol::protocol::{gpio, led};
 
-use crate::{Writer, Reader, ResourceMode};
+use crate::common::{Writer, Reader, ResourceMode};
 
 pub struct Gpio<P>(PhantomData<P>);
 
@@ -26,7 +26,7 @@ impl<P: TypePin> ResourceMode for Gpio<P> {
 
     async fn command(&self, _rt: Runtime, command: u8, _buf: &mut Reader<'_>, response: &mut Writer<'_>) -> Result<(), ()> {
         use viking_protocol::protocol::gpio::pin::cmd;
-        
+
         match command {
             cmd::FLOAT => {
                 P::oe_clr();
@@ -52,7 +52,7 @@ impl<P: TypePin> ResourceMode for Gpio<P> {
     }
 }
 
-/* 
+/*
 pub struct LevelInterrupt<P, const CH: u8>{
     _p: PhantomData<P>,
     event: Cell<Option<bool>>,
@@ -75,7 +75,7 @@ impl<P: TypePin, const CH: u8> ResourceMode for LevelInterrupt<P, CH> {
 
     async fn command(&self, command: u8, _buf: &mut &[u8], _response: &mut Writer<'_>) -> Result<(), ()> {
         use viking_protocol::protocol::gpio::level_interrupt::cmd;
-        
+
         let (sense, event) = match command {
             cmd::WAIT_LOW => (Sense::LOW, None),
             cmd::WAIT_HIGH => (Sense::HIGH, None),
@@ -176,7 +176,7 @@ impl<P: TypePin, const ACTIVE: bool, const COLOR: u8> ResourceMode for Led<P, {A
 
     async fn command(&self, _rt: Runtime, command: u8, _req: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
         use viking_protocol::protocol::led::binary::cmd;
-        
+
         match command {
             cmd::OFF => {
                 if ACTIVE {

@@ -7,7 +7,8 @@ use defmt::{debug, info, Format};
 use viking_protocol::protocol::i2c;
 use zeptos::Runtime;
 
-use crate::{const_bytes, Reader, ResourceMode, Writer};
+use crate::const_bytes;
+use crate::common::{Reader, ResourceMode, Writer};
 use super::sercom::{ Sercom, DynSercom };
 
 #[derive(Clone, Copy, Debug, PartialEq, Format)]
@@ -54,7 +55,7 @@ impl<S: Sercom> ResourceMode for SercomI2C<S> {
     async fn command(&self, _rt: Runtime, command: u8, req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
         use i2c::controller::cmd;
         let sercom = DynSercom(S::NUM);
-        
+
         match command {
             cmd::START => {
                 let addr = req.take_first().ok_or(())?;
@@ -123,7 +124,7 @@ fn init(sercom: DynSercom) {
     let regs = sercom.regs().i2cm();
     regs.ctrla.write(|w| w.mode().i2c_master());
     regs.baud.write(|w| w.baud().variant(235) ); // 100kHz
-    regs.ctrla.write(|w| 
+    regs.ctrla.write(|w|
         w.mode().i2c_master()
         .enable().set_bit()
     );
@@ -198,13 +199,13 @@ async fn write(sercom: DynSercom, data: &[u8], state: &Cell<State>) -> Result<()
 
         regs.data.write(|w| w.data().variant(b));
         sync_sysop(regs);
-    
+
         regs.intenset.write(|w| { w.mb().set_bit() });
-    
+
         sercom.notify().until(|| {
             regs.intflag.read().mb().bit_is_set()
         }).await;
-    
+
         if check_error(regs).is_err() {
             state.set(State::Nack);
         }
@@ -233,7 +234,7 @@ async fn read(sercom: DynSercom, n: u8, writer: &mut Writer<'_>, state: &Cell<St
         }
 
         writer.put(regs.data.read().data().bits())?;
-    
+
         if check_error(regs).is_err() {
             state.set(State::Nack);
         }
@@ -253,4 +254,3 @@ async fn stop(sercom: DynSercom, state: &Cell<State>) {
 
     state.set(State::Idle)
 }
-

@@ -5,7 +5,8 @@ use defmt::info;
 
 use viking_protocol::{protocol::spi, U32};
 
-use crate::{const_bytes, Reader, ResourceMode, Writer};
+use crate::const_bytes;
+use crate::common::{Reader, ResourceMode, Writer};
 use super::sercom::{ DynSercom, Sercom };
 
 pub struct SercomSPI<S, const DOPO: u8, const DIPO: u8> {
@@ -41,7 +42,7 @@ impl<S: Sercom, const DOPO: u8, const DIPO: u8> ResourceMode for SercomSPI<S, DO
     async fn command(&self, _rt: Runtime, command: u8, req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
         use spi::controller::cmd;
         let sercom = DynSercom(S::NUM);
-        
+
         match command {
             cmd::TRANSFER => {
                 transfer(sercom, req, res).await?;
@@ -143,6 +144,3 @@ async fn transfer(sercom: DynSercom, request: &mut Reader<'_>, response: &mut Wr
 
     Ok(())
 }
-
-
-
