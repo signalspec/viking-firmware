@@ -3,6 +3,9 @@ use zeptos::usb::Usb;
 mod gpio;
 pub use gpio::{Gpio, LevelInterrupt, Led};
 
+mod i2c;
+pub use i2c::{I2c, I2cSdaPin, I2cSclPin};
+
 pub struct Platform {
 
 }

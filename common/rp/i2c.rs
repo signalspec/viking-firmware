@@ -1,0 +1,187 @@
+use core::{marker::PhantomData};
+
+use zeptos::rp::{gpio::{TypePin, Function}, i2c};
+use defmt::{debug, info, Format};
+
+use viking_protocol::protocol::i2c as i2c_proto;
+
+use crate::const_bytes;
+use crate::common::{Reader, Resource, ResourceMode, Writer};
+
+#[derive(Clone, Copy, Debug, PartialEq, Format)]
+enum State {
+    Idle,
+    RestartRead,
+    RestartWrite,
+    Read,
+    Write,
+    Nack,
+}
+pub struct I2c<I: i2c::StaticInstance> {
+    controller: i2c::Controller<I>,
+    state: State,
+}
+
+impl<I: i2c::StaticInstance> ResourceMode for I2c<I> {
+    const PROTOCOL: u16 = i2c_proto::controller::PROTOCOL;
+    const DESCRIPTOR: &[u8] = {
+        use i2c_proto::controller::{ModeFlags, SpeedFlags};
+        const_bytes!(
+            i2c_proto::controller::DescribeMode {
+                flags: ModeFlags::CLOCK_STRETCH
+                    .union(ModeFlags::BYTE_AT_A_TIME)
+                    .union(ModeFlags::WRITE_THEN_READ)
+                    .union(ModeFlags::REPEATED_START_SAME_ADDRESS),
+                speed: SpeedFlags::STANDARD,
+            }
+        )
+    };
+
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
+        info!("i2c init");
+        let config = i2c::Config::default();
+        let instance = unsafe { I::steal() };
+        let controller = i2c::Controller::new(instance, config);
+        Ok(I2c { controller, state: State::Idle })
+    }
+
+    fn deinit(self, _resource: Resource) {
+        info!("i2c deinit");
+    }
+
+    async fn command(&mut self, _resource: Resource, command: u8, req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
+        use i2c_proto::controller::cmd;
+
+        match command {
+            cmd::START => {
+                let addr = req.take_first().ok_or(())?;
+                debug!("i2c set address {:x} in state {:?}", addr, self.state);
+
+                let read = addr & 1 != 0;
+                let addr = (addr >> 1) as u16;
+                match self.state {
+                    State::Idle => {
+                        self.controller.set_address(addr);
+                        self.state = if read { State::Read } else { State::Write }
+                    }
+                    State::Read | State::Write => {
+                        if addr != self.controller.get_address() {
+                            defmt::warn!("i2c restart with different address {:x} != {:x}", addr, self.controller.get_address());
+                            return Err(());
+                        }
+                        self.state = if read { State::RestartRead } else { State::RestartWrite };
+                    }
+                    _ => return Err(()),
+                }
+
+                res.put(0x00)?;
+                Ok(())
+            }
+            cmd::STOP => {
+                debug!("i2c stop in state {:?}", self.state);
+
+                match self.state {
+                    State::Read | State::Write | State::Nack => self.state = State::Idle,
+                    _ => return Err(()),
+                }
+
+                self.controller.abort().await;
+
+                Ok(())
+            }
+            cmd::READ => {
+                debug!("i2c read in state {:?}", self.state);
+                let len = req.take_first().ok_or(())? as u8;
+
+                let mut restart = match self.state{
+                    State::Read => false,
+                    State::RestartRead => {
+                        self.state = State::Read;
+                        true
+                    }
+                    _ => return Err(()),
+                };
+
+                for _ in 0..len {
+                    let data = self.controller.read(restart, false).await;
+                    debug!("i2c read byte -> {:?}", data);
+                    match data {
+                        Ok(byte) => res.put(byte)?,
+                        Err(i2c::Error::DataNack | i2c::Error::AddrNack) => {
+                            self.state = State::Nack;
+                            break;
+                        }
+                        Err(_) => return Err(()),
+                    }
+                    restart = false;
+                }
+
+                Ok(())
+            }
+            cmd::WRITE => {
+                debug!("i2c write in state {:?}", self.state);
+                let buf = req.take_len().ok_or(())?;
+
+                let mut restart = match self.state {
+                    State::Write => false,
+                    State::RestartWrite => {
+                        self.state = State::Write;
+                        true
+                    }
+                    _ => return Err(()),
+                };
+
+                for b in buf {
+                    let res = self.controller.write(*b, restart, false).await;
+                    debug!("i2c write byte {:02x} -> {:?}", b, res);
+                    match res {
+                        Ok(()) => (),
+                        Err(i2c::Error::AddrNack | i2c::Error::DataNack) => {
+                            self.state = State::Nack;
+                            break;
+                        }
+                        Err(_) => return Err(()),
+                    }
+                    restart = false;
+                }
+
+                Ok(())
+            }
+            _ => Err(())
+        }
+    }
+}
+
+pub struct I2cSclPin<P, I>(PhantomData<(P, I)>);
+
+impl<P: TypePin, I: i2c::StaticInstance> ResourceMode for I2cSclPin<P, I> {
+    const PROTOCOL: u16 = i2c_proto::scl::PROTOCOL;
+    const DESCRIPTOR: &'static [u8] = &[];
+
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
+        info!("SCL init");
+        P::set_function(Function::F3);
+        Ok(Self(PhantomData))
+    }
+
+    fn deinit(self, _resource: Resource) {
+        P::disable();
+    }
+}
+
+pub struct I2cSdaPin<P, I>(PhantomData<(P, I)>);
+
+impl<P: TypePin, I: i2c::StaticInstance> ResourceMode for I2cSdaPin<P, I> {
+    const PROTOCOL: u16 = i2c_proto::sda::PROTOCOL;
+    const DESCRIPTOR: &'static [u8] = &[];
+
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
+        info!("SDA init");
+        P::set_function(Function::F3);
+        Ok(Self(PhantomData))
+    }
+
+    fn deinit(self, _resource: Resource) {
+        P::disable();
+    }
+}
