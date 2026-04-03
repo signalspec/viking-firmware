@@ -20,7 +20,7 @@ enum State {
 }
 pub struct SercomI2C<S> {
     _p: PhantomData<S>,
-    state: Cell<State>,
+    state: State,
 }
 
 impl<S: Sercom> ResourceMode for SercomI2C<S> {
@@ -43,7 +43,7 @@ impl<S: Sercom> ResourceMode for SercomI2C<S> {
     fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
         info!("i2c init");
         init(DynSercom(S::NUM));
-        Ok(SercomI2C { _p: PhantomData, state: Cell::new(State::Idle) })
+        Ok(SercomI2C { _p: PhantomData, state: State::Idle })
     }
 
     fn deinit(self, _resource: Resource) {
@@ -51,33 +51,33 @@ impl<S: Sercom> ResourceMode for SercomI2C<S> {
         deinit(DynSercom(S::NUM));
     }
 
-    async fn command(&self, _resource: Resource, command: u8, req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&mut self, _resource: Resource, command: u8, req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
         use i2c::controller::cmd;
         let sercom = DynSercom(S::NUM);
 
         match command {
             cmd::START => {
                 let addr = req.take_first().ok_or(())?;
-                debug!("i2c start {:x} {:?}", addr, self.state.get());
-                let r = start(sercom, addr, &self.state).await;
-                debug!("i2c start -> {} {:?}", r, self.state.get());
+                debug!("i2c start {:x} {:?}", addr, self.state);
+                let r = start(sercom, addr, &mut self.state).await;
+                debug!("i2c start -> {} {:?}", r, self.state);
                 res.put(r)?;
                 Ok(())
             }
             cmd::STOP => {
-                debug!("i2c stop {:?}", self.state.get());
-                stop(sercom, &self.state).await;
+                debug!("i2c stop {:?}", self.state);
+                stop(sercom, &mut self.state).await;
                 Ok(())
             }
             cmd::READ => {
-                debug!("i2c read {:?}", self.state.get());
+                debug!("i2c read {:?}", self.state);
                 let len = req.take_first().ok_or(())? as u8;
-                read(sercom, len, res, &self.state).await
+                read(sercom, len, res, &mut self.state).await
             }
             cmd::WRITE => {
-                debug!("i2c write {:?}", self.state.get());
+                debug!("i2c write {:?}", self.state);
                 let buf = req.take_len().ok_or(())?;
-                write(sercom, buf, &self.state).await?;
+                write(sercom, buf, &mut self.state).await?;
                 Ok(())
             }
             _ => Err(())
@@ -159,7 +159,7 @@ fn sync_sysop(regs: &I2CM) {
     while regs.syncbusy.read().sysop().bit_is_set() {}
 }
 
-async fn start(sercom: DynSercom, addr: u8, state: &Cell<State>) -> u8 {
+async fn start(sercom: DynSercom, addr: u8, state: &mut State) -> u8 {
     let regs = sercom.regs().i2cm();
 
     regs.addr.write(|w| w.addr().variant(addr as u16));
@@ -177,22 +177,22 @@ async fn start(sercom: DynSercom, addr: u8, state: &Cell<State>) -> u8 {
     }).await;
 
     if check_error(regs).is_err() {
-        state.set(State::Nack);
+        *state = State::Nack;
         1
     } else if addr & 0x01 != 0 {
-        state.set(State::ReadFirst);
+        *state = State::ReadFirst;
         0
     } else {
-        state.set(State::Write);
+        *state = State::Write;
         0
     }
 }
 
-async fn write(sercom: DynSercom, data: &[u8], state: &Cell<State>) -> Result<(), ()> {
+async fn write(sercom: DynSercom, data: &[u8], state: &mut State) -> Result<(), ()> {
     let regs = sercom.regs().i2cm();
 
     for &b in data {
-        if state.get() != State::Write {
+        if *state != State::Write {
             return Err(())
         }
 
@@ -206,18 +206,18 @@ async fn write(sercom: DynSercom, data: &[u8], state: &Cell<State>) -> Result<()
         }).await;
 
         if check_error(regs).is_err() {
-            state.set(State::Nack);
+            *state = State::Nack;
         }
     }
 
     Ok(())
 }
 
-async fn read(sercom: DynSercom, n: u8, writer: &mut Writer<'_>, state: &Cell<State>) -> Result<(), ()> {
+async fn read(sercom: DynSercom, n: u8, writer: &mut Writer<'_>, state: &mut State) -> Result<(), ()> {
     let regs = sercom.regs().i2cm();
 
     for _ in 0..n {
-        if state.get() == State::Read {
+        if *state == State::Read {
             // Ack previous byte, read the next
             regs.ctrlb.write(|w| w.cmd().variant(0x02));
             sync_sysop(regs);
@@ -225,9 +225,9 @@ async fn read(sercom: DynSercom, n: u8, writer: &mut Writer<'_>, state: &Cell<St
             sercom.notify().until(|| {
                 regs.intflag.read().sb().bit_is_set()
             }).await;
-        } else if state.get() == State::ReadFirst {
+        } else if *state == State::ReadFirst {
             // First byte has already been read
-            state.set(State::Read);
+            *state = State::Read;
         } else {
             return Err(())
         }
@@ -235,14 +235,14 @@ async fn read(sercom: DynSercom, n: u8, writer: &mut Writer<'_>, state: &Cell<St
         writer.put(regs.data.read().data().bits())?;
 
         if check_error(regs).is_err() {
-            state.set(State::Nack);
+            *state = State::Nack;
         }
     }
 
     Ok(())
 }
 
-async fn stop(sercom: DynSercom, state: &Cell<State>) {
+async fn stop(sercom: DynSercom, state: &mut State) {
     let regs = sercom.regs().i2cm();
 
     regs.ctrlb.write(|w| {
@@ -251,5 +251,5 @@ async fn stop(sercom: DynSercom, state: &Cell<State>) {
     });
     sync_sysop(regs);
 
-    state.set(State::Idle)
+    *state = State::Idle;
 }

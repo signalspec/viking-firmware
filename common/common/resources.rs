@@ -9,7 +9,7 @@ pub trait ResourceMode: Sized {
     fn deinit(self, _resource: Resource);
 
     #[allow(async_fn_in_trait)]
-    async fn command(&self, _resource: Resource, _cmd: u8, _buf: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&mut self, _resource: Resource, _cmd: u8, _buf: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
         Err(())
     }
 }
@@ -164,11 +164,11 @@ macro_rules! viking{
                 )*
             }
 
-            async fn command(&self, resource: crate::common::Resource, command: u8, req: &mut crate::common::Reader<'_>, res: &mut crate::common::Writer<'_>) -> Result<(), ()> {
+            async fn command(&mut self, resource: crate::common::Resource, command: u8, req: &mut crate::common::Reader<'_>, res: &mut crate::common::Writer<'_>) -> Result<(), ()> {
                 use crate::common::resources::ResourceMode;
                 match resource.id() {
                     $(
-                        res_id if res_id == const { ${index()} + 1 } => match &self.$resource_name {
+                        res_id if res_id == const { ${index()} + 1 } => match &mut self.$resource_name {
                             $(Some(resources::$resource_name::$mode_name(s)) => s.command(resource, command, req, res).await,)*
                             _ => Err(())
                         }

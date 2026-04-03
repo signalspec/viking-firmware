@@ -25,7 +25,7 @@ impl<P: TypePin> ResourceMode for Gpio<P> {
         P::dirclr();
     }
 
-    async fn command(&self, _resource: Resource, command: u8, _req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&mut self, _resource: Resource, command: u8, _req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
         use viking_protocol::protocol::gpio::pin::cmd;
 
         match command {
@@ -83,7 +83,7 @@ impl<P: TypePin, const CH: u8> ResourceMode for LevelInterrupt<P, CH> {
         P::set_io();
     }
 
-    async fn command(&self, resource: Resource, command: u8, _req: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&mut self, resource: Resource, command: u8, _req: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
         use viking_protocol::protocol::gpio::level_interrupt::cmd;
         let rt = resource.rt;
 
@@ -207,7 +207,7 @@ impl<P: TypePin, const ACTIVE: bool, const COLOR: u8> ResourceMode for Led<P, {A
         info!("led deinit");
     }
 
-    async fn command(&self, _resource: Resource, command: u8, _req: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&mut self, _resource: Resource, command: u8, _req: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
         use viking_protocol::protocol::led::binary::cmd;
 
         match command {

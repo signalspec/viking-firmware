@@ -39,7 +39,7 @@ impl<S: Sercom, const DOPO: u8, const DIPO: u8> ResourceMode for SercomSPI<S, DO
         deinit(DynSercom(S::NUM));
     }
 
-    async fn command(&self, _resource: Resource, command: u8, req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&mut self, _resource: Resource, command: u8, req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
         use spi::controller::cmd;
         let sercom = DynSercom(S::NUM);
 
