@@ -2,8 +2,9 @@ use panic_probe as _;
 use defmt_rtt as _;
 use zeptos::Runtime;
 use zeptos::usb::Usb;
+use zerocopy::{FromBytes, IntoBytes};
 
-use core::convert::Infallible;
+use core::{cell::Cell, convert::Infallible};
 use core::cell::RefCell;
 
 mod buf;
@@ -21,6 +22,7 @@ pub async fn run(mut usb: Usb, platform: Platform) -> Infallible {
         rt,
         platform,
         resources: RefCell::new(Resources::new()),
+        last_config_err: Cell::new(0),
     }).await
 }
 
@@ -56,6 +58,16 @@ impl Resource {
         usb::EVENT_STATE.get(self.rt).borrow_mut().put_var_len(self.evt(event), byte);
         usb::wake_event_task(self.rt);
     }
+}
+
+pub type ErrorByte = u8;
+
+pub fn req_from_bytes<T: IntoBytes + FromBytes + Default>(bytes: &[u8]) -> T {
+    let mut v = T::default();
+    for (a, b) in v.as_mut_bytes().iter_mut().zip(bytes.iter()) {
+        *a = *b;
+    }
+    v
 }
 
 #[macro_export]

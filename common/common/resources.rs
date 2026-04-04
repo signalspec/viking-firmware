@@ -1,10 +1,10 @@
-use super::{Reader, Writer, Resource};
+use super::{Reader, Writer, Resource, ErrorByte};
 
 pub trait ResourceMode: Sized {
     const PROTOCOL: u16;
     const DESCRIPTOR: &'static [u8];
 
-    fn init(_resource: Resource, config: &[u8]) -> Result<Self, ()>;
+    fn init(_resource: Resource, config: &[u8]) -> Result<Self, ErrorByte>;
 
     fn deinit(self, _resource: Resource);
 
@@ -139,7 +139,7 @@ macro_rules! viking{
                 }
             }
 
-            fn configure(&mut self, resource: crate::common::Resource, mode: u8, config: &[u8]) -> Result<(), ()> {
+            fn configure(&mut self, resource: crate::common::Resource, mode: u8, config: &[u8]) -> Result<(), u8> {
                 #![allow(unreachable_code)]
                 match resource.id() {
                     $(
@@ -149,12 +149,12 @@ macro_rules! viking{
                                 $(mode_id if mode_id == const { ${index()} + 1 } => {
                                     resources::$resource_name::$mode_name(<$mode_ty as crate::common::resources::ResourceMode>::init(resource, config)?)
                                 })*
-                                _ => return Err(())
+                                _ => return Err(viking_protocol::errors::ERR_INVALID_MODE)
                             });
                             Ok(())
                         }
                     )*
-                    _ => Err(()),
+                    _ => Err(viking_protocol::errors::ERR_INVALID_RESOURCE),
                 }
             }
 

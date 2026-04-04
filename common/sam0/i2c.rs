@@ -7,7 +7,7 @@ use defmt::{debug, info, Format};
 use viking_protocol::protocol::i2c;
 
 use crate::const_bytes;
-use crate::common::{Reader, Resource, ResourceMode, Writer};
+use crate::common::{Reader, Resource, ResourceMode, Writer, ErrorByte};
 use super::sercom::{ Sercom, DynSercom };
 
 #[derive(Clone, Copy, Debug, PartialEq, Format)]
@@ -30,17 +30,19 @@ impl<S: Sercom> ResourceMode for SercomI2C<S> {
         const_bytes!(
             i2c::controller::DescribeMode {
                 flags: ModeFlags::CLOCK_STRETCH
-                    .union(ModeFlags::BYTE_AT_A_TIME)
+                    .union(ModeFlags::SPLIT)
                     .union(ModeFlags::WRITE_THEN_READ)
                     .union(ModeFlags::REPEATED_START)
                     .union(ModeFlags::REPEATED_START_SAME_ADDRESS)
-                    .union(ModeFlags::ZERO_LEN_WRITE),
+                    .union(ModeFlags::ZERO_LEN_WRITE)
+                    .union(ModeFlags::ADDR_NACK)
+                    .union(ModeFlags::PRECISE_NACK),
                 speed: SpeedFlags::STANDARD,
             }
         )
     };
 
-    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ErrorByte> {
         info!("i2c init");
         init(DynSercom(S::NUM));
         Ok(SercomI2C { _p: PhantomData, state: State::Idle })
@@ -91,7 +93,7 @@ impl<P: TypePin, S: Sercom, M: AlternateFunc> ResourceMode for SercomSCLPin<P, S
     const PROTOCOL: u16 = i2c::scl::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
-    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ErrorByte> {
         info!("sercom SCL init {:?} {:?}", P::DYN.group, P::DYN.pin);
         P::set_alternate(M::DYN);
         Ok(Self(PhantomData))
@@ -108,7 +110,7 @@ impl<P: TypePin, S, M: AlternateFunc> ResourceMode for SercomSDAPin<P, S, M> {
     const PROTOCOL: u16 = i2c::sda::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
-    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ErrorByte> {
         info!("sercom SDA init {:?} {:?}", P::DYN.group, P::DYN.pin);
         P::set_alternate(M::DYN);
         Ok(Self(PhantomData))

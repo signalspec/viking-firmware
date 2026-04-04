@@ -6,7 +6,7 @@ use defmt::info;
 use viking_protocol::{protocol::spi, U32};
 
 use crate::const_bytes;
-use crate::common::{Reader, Resource, ResourceMode, Writer};
+use crate::common::{Reader, Resource, ResourceMode, Writer, ErrorByte};
 use super::sercom::{ DynSercom, Sercom };
 
 pub struct SercomSPI<S, const DOPO: u8, const DIPO: u8> {
@@ -28,7 +28,7 @@ impl<S: Sercom, const DOPO: u8, const DIPO: u8> ResourceMode for SercomSPI<S, DO
         )
     };
 
-    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ErrorByte> {
         info!("spi init");
         init(DynSercom(S::NUM), DOPO, DIPO);
         Ok(SercomSPI { _p: PhantomData })
@@ -59,7 +59,7 @@ impl<P: TypePin, S: Sercom, M: AlternateFunc> ResourceMode for SercomSCKPin<P, S
     const PROTOCOL: u16 = spi::sck_pin::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
-    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ErrorByte> {
         info!("sercom SCK init {:?} {:?}", P::DYN.group, P::DYN.pin);
         P::set_alternate(M::DYN);
         Ok(Self(PhantomData))
@@ -76,7 +76,7 @@ impl<P: TypePin, S, M: AlternateFunc> ResourceMode for SercomSDOPin<P, S, M> {
     const PROTOCOL: u16 = spi::sdo_pin::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
-    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ErrorByte> {
         info!("sercom SDO init {:?} {:?}", P::DYN.group, P::DYN.pin);
         P::set_alternate(M::DYN);
         Ok(Self(PhantomData))
@@ -93,7 +93,7 @@ impl<P: TypePin, S, M: AlternateFunc> ResourceMode for SercomSDIPin<P, S, M> {
     const PROTOCOL: u16 = spi::sdi_pin::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
-    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ErrorByte> {
         info!("sercom SDI init {:?} {:?}", P::DYN.group, P::DYN.pin);
         P::set_alternate(M::DYN);
         Ok(Self(PhantomData))

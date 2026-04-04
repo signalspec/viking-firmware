@@ -1,9 +1,9 @@
-use defmt::info;
+use defmt::{info, warn};
 use futures_util::future::{Fuse, FusedFuture, FutureExt};
 use zeptos::usb::{UsbBuffer, In, Out, Endpoints, Setup, Responded};
 use zeptos::usb::descriptors::{DescriptorBuilder, LANGUAGE_LIST_US_ENGLISH};
 use zeptos::{Runtime, TaskOnly};
-use core::cell::RefCell;
+use core::cell::{Cell, RefCell};
 use core::future::poll_fn;
 use core::convert::Infallible;
 use core::task::Poll;
@@ -26,6 +26,7 @@ pub struct Handler {
     pub rt: Runtime,
     pub platform: Platform,
     pub resources: RefCell<Resources>,
+    pub last_config_err: Cell<u8>,
 }
 
 impl zeptos::usb::Handler for Handler{
@@ -60,6 +61,7 @@ impl zeptos::usb::Handler for Handler{
 
             self.resources.borrow_mut().reset_all(self.rt);
             EVENT_STATE.get(self.rt).replace(EventState::empty());
+            self.last_config_err.set(0);
 
             if alt == 1 {
                 info!("Enabling interface");
@@ -98,30 +100,36 @@ impl zeptos::usb::Handler for Handler{
                 data.respond(&MSOS_DESCRIPTOR).await
             }
 
-            Setup { ty: Vendor, recipient: Interface, index: I_VIKING, request: DESCRIBE_RESOURCES, data: In(data), .. } => {
-                data.respond(VIKING_DESCRIPTOR).await
+            Setup { ty: Vendor, recipient: Interface, index: I_VIKING, request: DESCRIBE_RESOURCES, value, data: In(data), .. } => {
+                data.respond(VIKING_DESCRIPTOR.get(value as usize ..).unwrap_or(&[])).await
             }
 
-            Setup { ty: Vendor, recipient: Interface, index: I_VIKING, value, request: CONFIGURE_MODE, data: Out(data), .. } => {
+            Setup { ty: Vendor, recipient: Interface, index: I_VIKING, value, request: CONFIGURE_MODE, data: Out(mut data), .. } => {
                 let id = (value >> 8) as u8;
                 let mode = (value & 0xff) as u8;
                 let resource = Resource { id, rt: self.rt };
-                info!("configure {} {}", id, mode);
 
-                let ok = if let Ok(mut resources) = self.resources.try_borrow_mut() {
-                    resources.configure(resource, mode, &[]).is_ok()
+                let config = data.receive().await;
+                info!("Configuring resource {} mode {} with config {:02x}", id, mode, config);
+
+                let err = if let Ok(mut resources) = self.resources.try_borrow_mut() {
+                    resources.configure(resource, mode, config).err().unwrap_or(0)
                 } else {
-                    info!("resource busy");
-                    false
+                    warn!("Resources are locked");
+                    viking_protocol::errors::ERR_BUSY
                 };
 
-                if ok {
+                self.last_config_err.set(err);
+
+                if err == 0 {
                     data.accept().await
                 } else {
                     data.reject()
                 }
             }
-
+            Setup { ty: Vendor, recipient: Interface, index: I_VIKING, value, request: CONFIGURE_MODE, data: In(data), .. } => {
+                data.respond(&[self.last_config_err.get()]).await
+            }
             unknown => unknown.reject(),
         }
     }

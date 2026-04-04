@@ -3,9 +3,10 @@ use core::{cell::Cell, marker::PhantomData, task::Waker};
 use zeptos::{Runtime, samd::gpio::{Alternate, TypePin}, Interrupt, TaskOnly};
 use defmt::info;
 use viking_protocol::protocol::{gpio, led};
+use viking_protocol::errors::ERR_CONFLICT;
 use zeptos::samd::pac::{interrupt, EIC};
 
-use crate::common::{Reader, Resource, ResourceMode, Writer};
+use crate::common::{Reader, Resource, ResourceMode, Writer, ErrorByte};
 
 pub struct Gpio<P>(PhantomData<P>);
 
@@ -13,7 +14,7 @@ impl<P: TypePin> ResourceMode for Gpio<P> {
     const PROTOCOL: u16 = gpio::pin::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
-    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ErrorByte> {
         info!("gpio init {:?} {:?}", P::DYN.group, P::DYN.pin);
         P::pincfg().write(|w| w.inen().set_bit());
         P::enable_sampling();
@@ -62,14 +63,14 @@ impl<P: TypePin, const CH: u8> ResourceMode for LevelInterrupt<P, CH> {
     const PROTOCOL: u16 = gpio::level_interrupt::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
-    fn init(resource: Resource, _config: &[u8]) -> Result<Self, ()> {
+    fn init(resource: Resource, _config: &[u8]) -> Result<Self, ErrorByte> {
         let rt = resource.rt;
         info!("level_interrupt init {:?} {:?}", P::DYN.group, P::DYN.pin);
         P::set_alternate(Alternate::A);
         let state = &GPIO_INT_STATE.get(rt)[CH as usize];
 
         if !matches!(state.get(), EventWatch::Free) {
-            return Err(());
+            return Err(ERR_CONFLICT);
         }
 
         state.set(EventWatch::Idle);
@@ -191,7 +192,7 @@ impl<P: TypePin, const ACTIVE: bool, const COLOR: u8> ResourceMode for Led<P, {A
     const PROTOCOL: u16 = led::binary::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[COLOR];
 
-    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ErrorByte> {
         info!("led init {:?} {:?}", P::DYN.group, P::DYN.pin);
         if ACTIVE {
             P::outset();

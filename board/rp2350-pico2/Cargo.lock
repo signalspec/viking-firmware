@@ -407,6 +407,7 @@ dependencies = [
  "usb",
  "viking-protocol",
  "zeptos",
+ "zerocopy",
 ]
 
 [[package]]

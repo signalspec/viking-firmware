@@ -5,8 +5,8 @@ use defmt::{debug, info, Format};
 
 use viking_protocol::protocol::i2c as i2c_proto;
 
-use crate::const_bytes;
-use crate::common::{Reader, Resource, ResourceMode, Writer};
+use crate::{common::ErrorByte, const_bytes};
+use crate::common::{Reader, Resource, ResourceMode, Writer, req_from_bytes};
 
 #[derive(Clone, Copy, Debug, PartialEq, Format)]
 enum State {
@@ -17,6 +17,7 @@ enum State {
     Write,
     Nack,
 }
+
 pub struct I2c<I: i2c::StaticInstance> {
     controller: i2c::Controller<I>,
     state: State,
@@ -28,18 +29,26 @@ impl<I: i2c::StaticInstance> ResourceMode for I2c<I> {
         use i2c_proto::controller::{ModeFlags, SpeedFlags};
         const_bytes!(
             i2c_proto::controller::DescribeMode {
-                flags: ModeFlags::CLOCK_STRETCH
-                    .union(ModeFlags::BYTE_AT_A_TIME)
+                flags: ModeFlags::PINS
+                    .union(ModeFlags::CLOCK_STRETCH)
+                    .union(ModeFlags::SPLIT)
                     .union(ModeFlags::WRITE_THEN_READ)
                     .union(ModeFlags::REPEATED_START_SAME_ADDRESS),
-                speed: SpeedFlags::STANDARD,
+                speed: SpeedFlags::STANDARD.union(SpeedFlags::FAST).union(SpeedFlags::SLOW),
             }
         )
     };
 
-    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
+    fn init(_resource: Resource, req: &[u8]) -> Result<Self, u8> {
         info!("i2c init");
-        let config = i2c::Config::default();
+        let req = req_from_bytes::<i2c_proto::controller::Config>(req);
+        let mut config = i2c::Config::default();
+        config.frequency = match req.speed {
+            i2c_proto::controller::speed::SLOW => 10_000,
+            i2c_proto::controller::speed::STANDARD => 100_000,
+            i2c_proto::controller::speed::FAST => 400_000,
+            _ => return Err(viking_protocol::errors::ERR_UNSUPPORTED_CLOCK),
+        };
         let instance = unsafe { I::steal() };
         let controller = i2c::Controller::new(instance, config);
         Ok(I2c { controller, state: State::Idle })
@@ -158,7 +167,7 @@ impl<P: TypePin, I: i2c::StaticInstance> ResourceMode for I2cSclPin<P, I> {
     const PROTOCOL: u16 = i2c_proto::scl::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
-    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ErrorByte> {
         info!("SCL init");
         P::set_function(Function::F3);
         Ok(Self(PhantomData))
@@ -175,7 +184,7 @@ impl<P: TypePin, I: i2c::StaticInstance> ResourceMode for I2cSdaPin<P, I> {
     const PROTOCOL: u16 = i2c_proto::sda::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
-    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ErrorByte> {
         info!("SDA init");
         P::set_function(Function::F3);
         Ok(Self(PhantomData))

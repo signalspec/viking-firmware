@@ -4,7 +4,7 @@ use zeptos::{Runtime, TaskOnly, rp::gpio::*, task};
 use defmt::{debug, info};
 use viking_protocol::protocol::{gpio, led};
 
-use crate::common::{Writer, Reader, ResourceMode, Resource};
+use crate::common::{Writer, Reader, ResourceMode, Resource, ErrorByte};
 
 pub fn init(rt: Runtime) {
     gpio_interrupt_task(rt).spawn(rt);
@@ -16,7 +16,7 @@ impl<P: TypePin> ResourceMode for Gpio<P> {
     const PROTOCOL: u16 = gpio::pin::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
-    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ErrorByte> {
         info!("gpio{} init", P::DYN.pin);
         P::set_function(Function::F5);
         Ok(Gpio(PhantomData))
@@ -64,7 +64,7 @@ impl<P: TypePin> ResourceMode for LevelInterrupt<P> {
     const PROTOCOL: u16 = gpio::level_interrupt::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[];
 
-    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ErrorByte> {
         info!("level_interrupt init {}", P::DYN.pin);
         P::set_function(Function::F5);
         Ok(LevelInterrupt { _p: PhantomData })
@@ -151,7 +151,7 @@ impl<P: TypePin, const ACTIVE: bool, const COLOR: u8> ResourceMode for Led<P, {A
     const PROTOCOL: u16 = led::binary::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = &[COLOR];
 
-    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ()> {
+    fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ErrorByte> {
         P::set_function(Function::F5);
         if ACTIVE {
             P::out_set();
