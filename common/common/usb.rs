@@ -150,41 +150,51 @@ async fn bulk_task(rt: Runtime, resources: &'static RefCell<Resources>, mut ep_o
                 continue;
             }
             let sync = buf_out[0];
+            buf_in[0] = sync;
+            buf_in[1] = 0;
 
             let req = Reader::new(&buf_out[2..len]);
             let mut res = Writer::new(&mut buf_in[..], 2);
 
-            let status = match run_cmds(rt, &mut resources.borrow_mut(), req, &mut res).await {
-                Ok(_) => 0,
-                Err(e) => e,
-            };
+            run_cmds(rt, &mut resources.borrow_mut(), req, &mut res).await;
 
             let response_len = res.offset();
-            buf_in[0] = sync;
-            buf_in[1] = status;
             ep_in.send(buf_in, response_len, true).await; //todo zlp
             info!("bulk write complete");
         }
     }
 }
 
-async fn run_cmds(rt: Runtime, resources: &mut Resources, mut req: Reader<'_>, res: &mut Writer<'_>) -> Result<(), ErrorByte> {
+async fn run_cmds(rt: Runtime, resources: &mut Resources, mut req: Reader<'_>, res: &mut Writer<'_>) {
     while let Some(byte) = req.take_first() {
         use viking_protocol::protocol::cmd;
-        match byte {
-            cmd::DELAY => {
-                let us: u32 = req.take_u16().ok_or(ERR_MISSING_ARG)? as u32;
-                rt.delay_us(us).await;
-            }
+        let Ok(status_pos) = res.reserve() else {
+            defmt::error!("response buffer full");
+            break;
+        };
+
+        let status = match byte {
+            cmd::DELAY => cmd_delay(rt, &mut req).await,
             byte => {
                 let id = byte & ((1 << 6) - 1);
                 let command = byte >> 6;
                 let resource = Resource { id, rt };
-                resources.command(resource, command, &mut req, res).await?
+                resources.command(resource, command, &mut req, res).await
             }
+        };
+
+        *status_pos = status.unwrap_or_else(|e| e);
+        if status.is_err() {
+            defmt::error!("aborting due to command error {:02x}", *status_pos);
+            break;
         }
     }
-    Ok(())
+}
+
+async fn cmd_delay(rt: Runtime, req: &mut Reader<'_>) -> Result<u8, ErrorByte> {
+    let us: u32 = req.take_u16().ok_or(ERR_MISSING_ARG)? as u32;
+    rt.delay_us(us).await;
+    Ok(0)
 }
 
 pub struct EventState {

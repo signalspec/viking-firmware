@@ -4,24 +4,44 @@ use crate::common::ErrorByte;
 use viking_protocol::errors::ERR_RESPONSE_FULL;
 
 pub struct Writer<'a> {
-    offset: usize,
-    buf: &'a mut [u8],
+    start: *mut u8,
+    pos: *mut u8,
+    end: *mut u8,
+    _phantom: PhantomData<&'a mut [u8]>,
 }
 
 impl<'a> Writer<'a> {
     pub fn new(buf: &'a mut [u8], offset: usize) -> Writer<'a> {
-        Writer { buf, offset }
+        Writer {
+            start: buf.as_mut_ptr(),
+            pos: unsafe { buf.as_mut_ptr().add(offset) },
+            end: unsafe { buf.as_mut_ptr().add(buf.len()) },
+            _phantom: PhantomData,
+        }
     }
 
     pub fn offset(&self) -> usize {
-        self.offset
+        unsafe { self.pos.offset_from_unsigned(self.start) }
     }
 
     pub fn put(&mut self, b: u8) -> Result<(), ErrorByte> {
-        let next = self.buf.get_mut(self.offset).ok_or(ERR_RESPONSE_FULL)?;
-        *next = b;
-        self.offset += 1;
-        Ok(())
+        if self.pos < self.end {
+            unsafe { *self.pos = b };
+            self.pos = unsafe { self.pos.add(1) };
+            Ok(())
+        } else {
+            Err(ERR_RESPONSE_FULL)
+        }
+    }
+
+    pub fn reserve(&mut self) -> Result<&'a mut u8, ()> {
+        if self.pos < self.end {
+            let r = unsafe { &mut *self.pos };
+            self.pos = unsafe { self.pos.add(1) };
+            Ok(r)
+        } else {
+            Err(())
+        }
     }
 }
 

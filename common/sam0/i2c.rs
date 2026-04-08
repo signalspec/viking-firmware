@@ -54,7 +54,7 @@ impl<S: Sercom> ResourceMode for SercomI2C<S> {
         deinit(DynSercom(S::NUM));
     }
 
-    async fn command(&mut self, _resource: Resource, command: u8, req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ErrorByte> {
+    async fn command(&mut self, _resource: Resource, command: u8, req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<u8, ErrorByte> {
         use i2c::controller::cmd;
         let sercom = DynSercom(S::NUM);
 
@@ -64,25 +64,24 @@ impl<S: Sercom> ResourceMode for SercomI2C<S> {
                 debug!("i2c start {:x} {:?}", addr, self.state);
                 let r = start(sercom, addr, &mut self.state).await;
                 debug!("i2c start -> {} {:?}", r, self.state);
-                res.put(r)?;
-                Ok(())
+                Ok(r)
             }
             cmd::STOP => {
                 debug!("i2c stop {:?}", self.state);
                 stop(sercom, &mut self.state).await;
-                Ok(())
+                Ok(0)
             }
             cmd::READ => {
                 debug!("i2c read {:?}", self.state);
                 let len = req.take_first().ok_or(ERR_MISSING_ARG)? as u8;
-                read(sercom, len, res, &mut self.state).await
+                read(sercom, len, res, &mut self.state).await?;
+                Ok(0)
             }
             cmd::WRITE => {
                 debug!("i2c write {:?}", self.state);
                 let buf = req.take_len().ok_or(ERR_MISSING_ARG)?;
                 let written = write(sercom, buf, &mut self.state).await?;
-                res.put(written)?;
-                Ok(())
+                Ok(0)
             }
             _ => Err(ERR_INVALID_COMMAND)
         }
@@ -192,10 +191,8 @@ async fn start(sercom: DynSercom, addr: u8, state: &mut State) -> u8 {
     }
 }
 
-async fn write(sercom: DynSercom, data: &[u8], state: &mut State) -> Result<u8, ErrorByte> {
+async fn write(sercom: DynSercom, data: &[u8], state: &mut State) -> Result<(), ErrorByte> {
     let regs = sercom.regs().i2cm();
-
-    let mut sent = 0;
 
     for &b in data {
         if *state != State::Write {
@@ -215,11 +212,9 @@ async fn write(sercom: DynSercom, data: &[u8], state: &mut State) -> Result<u8, 
             *state = State::Nack;
             break;
         }
-
-        sent += 1;
     }
 
-    Ok(sent)
+    Ok(())
 }
 
 async fn read(sercom: DynSercom, n: u8, writer: &mut Writer<'_>, state: &mut State) -> Result<(), ErrorByte> {
