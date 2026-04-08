@@ -1,3 +1,5 @@
+use core::{marker::PhantomData, slice};
+
 use crate::common::ErrorByte;
 use viking_protocol::errors::ERR_RESPONSE_FULL;
 
@@ -24,30 +26,56 @@ impl<'a> Writer<'a> {
 }
 
 pub struct Reader<'a> {
-    buf: &'a [u8],
+    ptr: *const u8,
+    end: *const u8,
+    _phantom: PhantomData<&'a [u8]>,
 }
 
 impl<'a> Reader<'a> {
     pub fn new(buf: &'a [u8]) -> Reader<'a> {
-        Reader { buf }
+        Reader {
+            ptr: buf.as_ptr(),
+            end: unsafe { buf.as_ptr().add(buf.len()) },
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn remaining(&self) -> usize {
+        unsafe { self.end.offset_from_unsigned(self.ptr) }
     }
 
     pub fn take_first(&mut self) -> Option<u8> {
-        let (first, rem) = self.buf.split_first()?;
-        self.buf = rem;
-        Some(*first)
+        if self.ptr < self.end {
+            let b = unsafe { *self.ptr };
+            self.ptr = unsafe { self.ptr.add(1) };
+            Some(b)
+        } else {
+            None
+        }
+    }
+
+    pub fn take_n<const N: usize>(&mut self) -> Option<&'a [u8; N]> {
+        if self.remaining() >= N {
+            let r = unsafe {&*(self.ptr as *const [u8; N])};
+            self.ptr = unsafe { self.ptr.add(N) };
+            Some(r)
+        } else {
+            None
+        }
     }
 
     pub fn take_len(&mut self) -> Option<&'a [u8]> {
         let len = self.take_first()? as usize;
-        let (first, rem) = self.buf.split_at(len);
-        self.buf = rem;
-        Some(first)
+        if self.remaining() >= len {
+            let r = unsafe {slice::from_raw_parts(self.ptr, len)};
+            self.ptr = unsafe { self.ptr.add(len) };
+            Some(r)
+        } else {
+            None
+        }
     }
 
     pub fn take_u16(&mut self) -> Option<u16> {
-        let (first, rem) = self.buf.split_at_checked(2)?;
-        self.buf = rem;
-        Some(u16::from_le_bytes([first[0], first[1]]))
+        Some(u16::from_le_bytes([self.take_first()?, self.take_first()?]))
     }
 }
