@@ -28,10 +28,10 @@ bench = false
 incremental = false
 codegen-units = 1
 lto = true
-opt-level = "z"
+opt-level = "s"
 
 [profile.release]
 debug = true
 codegen-units = 1
 lto = true
-opt-level = "z"
+opt-level = "s"
