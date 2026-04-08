@@ -3,7 +3,7 @@ use core::{cell::Cell, marker::PhantomData, task::Waker};
 use zeptos::{Runtime, samd::gpio::{Alternate, TypePin}, Interrupt, TaskOnly};
 use defmt::info;
 use viking_protocol::protocol::{gpio, led};
-use viking_protocol::errors::ERR_CONFLICT;
+use viking_protocol::errors::{ERR_CONFLICT, ERR_INVALID_COMMAND};
 use zeptos::samd::pac::{interrupt, EIC};
 
 use crate::common::{Reader, Resource, ResourceMode, Writer, ErrorByte};
@@ -26,7 +26,7 @@ impl<P: TypePin> ResourceMode for Gpio<P> {
         P::dirclr();
     }
 
-    async fn command(&mut self, _resource: Resource, command: u8, _req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&mut self, _resource: Resource, command: u8, _req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ErrorByte> {
         use viking_protocol::protocol::gpio::pin::cmd;
 
         match command {
@@ -49,7 +49,7 @@ impl<P: TypePin> ResourceMode for Gpio<P> {
                 P::dirset();
                 Ok(())
             }
-            _ => Err(())
+            _ => Err(ERR_INVALID_COMMAND)
         }
     }
 }
@@ -84,7 +84,7 @@ impl<P: TypePin, const CH: u8> ResourceMode for LevelInterrupt<P, CH> {
         P::set_io();
     }
 
-    async fn command(&mut self, resource: Resource, command: u8, _req: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&mut self, resource: Resource, command: u8, _req: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ErrorByte> {
         use viking_protocol::protocol::gpio::level_interrupt::cmd;
         let rt = resource.rt;
 
@@ -93,7 +93,7 @@ impl<P: TypePin, const CH: u8> ResourceMode for LevelInterrupt<P, CH> {
             cmd::WAIT_HIGH => (Sense::HIGH, None),
             cmd::EVT_LOW => (Sense::LOW, Some(false)),
             cmd::EVT_HIGH => (Sense::HIGH, Some(true)),
-            _ => return Err(())
+            _ => return Err(ERR_INVALID_COMMAND)
         };
 
         configure_interrupt(CH, sense);
@@ -208,7 +208,7 @@ impl<P: TypePin, const ACTIVE: bool, const COLOR: u8> ResourceMode for Led<P, {A
         info!("led deinit");
     }
 
-    async fn command(&mut self, _resource: Resource, command: u8, _req: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&mut self, _resource: Resource, command: u8, _req: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ErrorByte> {
         use viking_protocol::protocol::led::binary::cmd;
 
         match command {
@@ -228,7 +228,7 @@ impl<P: TypePin, const ACTIVE: bool, const COLOR: u8> ResourceMode for Led<P, {A
                 }
                 Ok(())
             }
-            _ => Err(())
+            _ => Err(ERR_INVALID_COMMAND)
         }
     }
 }

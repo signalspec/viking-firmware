@@ -1,3 +1,6 @@
+use crate::common::ErrorByte;
+use viking_protocol::errors::ERR_RESPONSE_FULL;
+
 pub struct Writer<'a> {
     offset: usize,
     buf: &'a mut [u8],
@@ -12,8 +15,8 @@ impl<'a> Writer<'a> {
         self.offset
     }
 
-    pub fn put(&mut self, b: u8) -> Result<(), ()> {
-        let next = self.buf.get_mut(self.offset).ok_or(())?;
+    pub fn put(&mut self, b: u8) -> Result<(), ErrorByte> {
+        let next = self.buf.get_mut(self.offset).ok_or(ERR_RESPONSE_FULL)?;
         *next = b;
         self.offset += 1;
         Ok(())
@@ -28,7 +31,7 @@ impl<'a> Reader<'a> {
     pub fn new(buf: &'a [u8]) -> Reader<'a> {
         Reader { buf }
     }
-    
+
     pub fn take_first(&mut self) -> Option<u8> {
         let (first, rem) = self.buf.split_first()?;
         self.buf = rem;
@@ -48,4 +51,3 @@ impl<'a> Reader<'a> {
         Some(u16::from_le_bytes([first[0], first[1]]))
     }
 }
-

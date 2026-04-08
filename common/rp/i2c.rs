@@ -4,6 +4,7 @@ use zeptos::rp::{gpio::{TypePin, Function}, i2c};
 use defmt::{debug, info, Format};
 
 use viking_protocol::protocol::i2c as i2c_proto;
+use viking_protocol::errors::{ERR_MISSING_ARG, ERR_INVALID_STATE, ERR_ADDR_NACK, ERR_DATA_NACK, ERR_ARBITRATION_LOST, ERR_UNKNOWN, ERR_INVALID_COMMAND};
 
 use crate::{common::ErrorByte, const_bytes};
 use crate::common::{Reader, Resource, ResourceMode, Writer, req_from_bytes};
@@ -15,7 +16,9 @@ enum State {
     RestartWrite,
     Read,
     Write,
-    Nack,
+    AddrNack,
+    DataNack,
+    ArbitrationLost,
 }
 
 pub struct I2c<I: i2c::StaticInstance> {
@@ -58,12 +61,12 @@ impl<I: i2c::StaticInstance> ResourceMode for I2c<I> {
         info!("i2c deinit");
     }
 
-    async fn command(&mut self, _resource: Resource, command: u8, req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&mut self, _resource: Resource, command: u8, req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ErrorByte> {
         use i2c_proto::controller::cmd;
 
         match command {
             cmd::START => {
-                let addr = req.take_first().ok_or(())?;
+                let addr = req.take_first().ok_or(ERR_MISSING_ARG)?;
                 debug!("i2c set address {:x} in state {:?}", addr, self.state);
 
                 let read = addr & 1 != 0;
@@ -76,11 +79,11 @@ impl<I: i2c::StaticInstance> ResourceMode for I2c<I> {
                     State::Read | State::Write => {
                         if addr != self.controller.get_address() {
                             defmt::warn!("i2c restart with different address {:x} != {:x}", addr, self.controller.get_address());
-                            return Err(());
+                            return Err(ERR_INVALID_STATE);
                         }
                         self.state = if read { State::RestartRead } else { State::RestartWrite };
                     }
-                    _ => return Err(()),
+                    _ => return Err(ERR_INVALID_STATE),
                 }
 
                 res.put(0x00)?;
@@ -89,18 +92,14 @@ impl<I: i2c::StaticInstance> ResourceMode for I2c<I> {
             cmd::STOP => {
                 debug!("i2c stop in state {:?}", self.state);
 
-                match self.state {
-                    State::Read | State::Write | State::Nack => self.state = State::Idle,
-                    _ => return Err(()),
-                }
-
                 self.controller.abort().await;
+                self.state = State::Idle;
 
                 Ok(())
             }
             cmd::READ => {
                 debug!("i2c read in state {:?}", self.state);
-                let len = req.take_first().ok_or(())? as u8;
+                let len = req.take_first().ok_or(ERR_MISSING_ARG)? as u8;
 
                 let mut restart = match self.state{
                     State::Read => false,
@@ -108,7 +107,10 @@ impl<I: i2c::StaticInstance> ResourceMode for I2c<I> {
                         self.state = State::Read;
                         true
                     }
-                    _ => return Err(()),
+                    State::AddrNack => return Err(ERR_ADDR_NACK),
+                    State::DataNack => return Err(ERR_DATA_NACK),
+                    State::ArbitrationLost => return Err(ERR_ARBITRATION_LOST),
+                    _ => return Err(ERR_INVALID_STATE),
                 };
 
                 for _ in 0..len {
@@ -116,11 +118,19 @@ impl<I: i2c::StaticInstance> ResourceMode for I2c<I> {
                     debug!("i2c read byte -> {:?}", data);
                     match data {
                         Ok(byte) => res.put(byte)?,
-                        Err(i2c::Error::DataNack | i2c::Error::AddrNack) => {
-                            self.state = State::Nack;
-                            break;
+                        Err(i2c::Error::AddrNack) => {
+                            self.state = State::AddrNack;
+                            return Err(ERR_ADDR_NACK);
                         }
-                        Err(_) => return Err(()),
+                        Err(i2c::Error::DataNack) => {
+                            self.state = State::DataNack;
+                            return Err(ERR_DATA_NACK);
+                        }
+                        Err(i2c::Error::ArbitrationLost) => {
+                            self.state = State::ArbitrationLost;
+                            return Err(ERR_ARBITRATION_LOST);
+                        }
+                        Err(_) => return Err(ERR_UNKNOWN),
                     }
                     restart = false;
                 }
@@ -129,7 +139,7 @@ impl<I: i2c::StaticInstance> ResourceMode for I2c<I> {
             }
             cmd::WRITE => {
                 debug!("i2c write in state {:?}", self.state);
-                let buf = req.take_len().ok_or(())?;
+                let buf = req.take_len().ok_or(ERR_MISSING_ARG)?;
 
                 let mut restart = match self.state {
                     State::Write => false,
@@ -137,26 +147,42 @@ impl<I: i2c::StaticInstance> ResourceMode for I2c<I> {
                         self.state = State::Write;
                         true
                     }
-                    _ => return Err(()),
+                    State::AddrNack => return Err(ERR_ADDR_NACK),
+                    State::DataNack => return Err(ERR_DATA_NACK),
+                    State::ArbitrationLost => return Err(ERR_ARBITRATION_LOST),
+                    _ => return Err(ERR_INVALID_STATE),
                 };
+
+                let mut count: u8 = 0;
 
                 for b in buf {
                     let res = self.controller.write(*b, restart, false).await;
                     debug!("i2c write byte {:02x} -> {:?}", b, res);
                     match res {
                         Ok(()) => (),
-                        Err(i2c::Error::AddrNack | i2c::Error::DataNack) => {
-                            self.state = State::Nack;
+                        Err(i2c::Error::AddrNack) => {
+                            self.state = State::AddrNack;
                             break;
                         }
-                        Err(_) => return Err(()),
+                        Err(i2c::Error::DataNack) => {
+                            self.state = State::DataNack;
+                            break;
+                        }
+                        Err(i2c::Error::ArbitrationLost) => {
+                            self.state = State::ArbitrationLost;
+                            return Err(ERR_ARBITRATION_LOST);
+                        }
+                        Err(_) => return Err(ERR_UNKNOWN),
                     }
+                    count += 1;
                     restart = false;
                 }
 
+                res.put(count)?;
+
                 Ok(())
             }
-            _ => Err(())
+            _ => Err(ERR_INVALID_COMMAND)
         }
     }
 }

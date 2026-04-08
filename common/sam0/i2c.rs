@@ -5,6 +5,7 @@ use zeptos::samd::gpio:: AlternateFunc ;
 use defmt::{debug, info, Format};
 
 use viking_protocol::protocol::i2c;
+use viking_protocol::errors::{ERR_INVALID_COMMAND, ERR_MISSING_ARG, ERR_INVALID_STATE};
 
 use crate::const_bytes;
 use crate::common::{Reader, Resource, ResourceMode, Writer, ErrorByte};
@@ -53,13 +54,13 @@ impl<S: Sercom> ResourceMode for SercomI2C<S> {
         deinit(DynSercom(S::NUM));
     }
 
-    async fn command(&mut self, _resource: Resource, command: u8, req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
+    async fn command(&mut self, _resource: Resource, command: u8, req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<(), ErrorByte> {
         use i2c::controller::cmd;
         let sercom = DynSercom(S::NUM);
 
         match command {
             cmd::START => {
-                let addr = req.take_first().ok_or(())?;
+                let addr = req.take_first().ok_or(ERR_MISSING_ARG)?;
                 debug!("i2c start {:x} {:?}", addr, self.state);
                 let r = start(sercom, addr, &mut self.state).await;
                 debug!("i2c start -> {} {:?}", r, self.state);
@@ -73,16 +74,17 @@ impl<S: Sercom> ResourceMode for SercomI2C<S> {
             }
             cmd::READ => {
                 debug!("i2c read {:?}", self.state);
-                let len = req.take_first().ok_or(())? as u8;
+                let len = req.take_first().ok_or(ERR_MISSING_ARG)? as u8;
                 read(sercom, len, res, &mut self.state).await
             }
             cmd::WRITE => {
                 debug!("i2c write {:?}", self.state);
-                let buf = req.take_len().ok_or(())?;
-                write(sercom, buf, &mut self.state).await?;
+                let buf = req.take_len().ok_or(ERR_MISSING_ARG)?;
+                let written = write(sercom, buf, &mut self.state).await?;
+                res.put(written)?;
                 Ok(())
             }
-            _ => Err(())
+            _ => Err(ERR_INVALID_COMMAND)
         }
     }
 }
@@ -190,12 +192,14 @@ async fn start(sercom: DynSercom, addr: u8, state: &mut State) -> u8 {
     }
 }
 
-async fn write(sercom: DynSercom, data: &[u8], state: &mut State) -> Result<(), ()> {
+async fn write(sercom: DynSercom, data: &[u8], state: &mut State) -> Result<u8, ErrorByte> {
     let regs = sercom.regs().i2cm();
+
+    let mut sent = 0;
 
     for &b in data {
         if *state != State::Write {
-            return Err(())
+            return Err(ERR_INVALID_STATE)
         }
 
         regs.data.write(|w| w.data().variant(b));
@@ -209,13 +213,16 @@ async fn write(sercom: DynSercom, data: &[u8], state: &mut State) -> Result<(), 
 
         if check_error(regs).is_err() {
             *state = State::Nack;
+            break;
         }
+
+        sent += 1;
     }
 
-    Ok(())
+    Ok(sent)
 }
 
-async fn read(sercom: DynSercom, n: u8, writer: &mut Writer<'_>, state: &mut State) -> Result<(), ()> {
+async fn read(sercom: DynSercom, n: u8, writer: &mut Writer<'_>, state: &mut State) -> Result<(), ErrorByte> {
     let regs = sercom.regs().i2cm();
 
     for _ in 0..n {
@@ -231,7 +238,7 @@ async fn read(sercom: DynSercom, n: u8, writer: &mut Writer<'_>, state: &mut Sta
             // First byte has already been read
             *state = State::Read;
         } else {
-            return Err(())
+            return Err(ERR_INVALID_STATE)
         }
 
         writer.put(regs.data.read().data().bits())?;

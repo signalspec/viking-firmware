@@ -10,8 +10,9 @@ use core::task::Poll;
 use core::mem;
 use core::pin::pin;
 use core::ptr::addr_of_mut;
+use viking_protocol::errors::ERR_MISSING_ARG;
 
-use crate::common::{Reader, Resource, Writer};
+use crate::common::{Reader, Resource, Writer, ErrorByte};
 
 // Board-specific configuration defined at the root of the crate
 use crate::{CMD_BUF_SIZE, RES_BUF_SIZE, EVT_BUF_SIZE, PRODUCT_STRING, VIKING_DESCRIPTOR, Resources, Platform};
@@ -155,7 +156,7 @@ async fn bulk_task(rt: Runtime, resources: &'static RefCell<Resources>, mut ep_o
 
             let status = match run_cmds(rt, &mut resources.borrow_mut(), req, &mut res).await {
                 Ok(_) => 0,
-                Err(_) => 1,
+                Err(e) => e,
             };
 
             let response_len = res.offset();
@@ -167,23 +168,22 @@ async fn bulk_task(rt: Runtime, resources: &'static RefCell<Resources>, mut ep_o
     }
 }
 
-async fn run_cmds(rt: Runtime, resources: &mut Resources, mut req: Reader<'_>, res: &mut Writer<'_>) -> Result<(), ()> {
+async fn run_cmds(rt: Runtime, resources: &mut Resources, mut req: Reader<'_>, res: &mut Writer<'_>) -> Result<(), ErrorByte> {
     while let Some(byte) = req.take_first() {
         use viking_protocol::protocol::cmd;
         match byte {
             cmd::DELAY => {
-                let us: u32 = req.take_u16().ok_or(())? as u32;
+                let us: u32 = req.take_u16().ok_or(ERR_MISSING_ARG)? as u32;
                 rt.delay_us(us).await;
             }
             byte => {
                 let id = byte & ((1 << 6) - 1);
                 let command = byte >> 6;
                 let resource = Resource { id, rt };
-                resources.command(resource, command, &mut req, res).await?;
+                resources.command(resource, command, &mut req, res).await?
             }
         }
     }
-
     Ok(())
 }
 

@@ -9,8 +9,8 @@ pub trait ResourceMode: Sized {
     fn deinit(self, _resource: Resource);
 
     #[allow(async_fn_in_trait)]
-    async fn command(&mut self, _resource: Resource, _cmd: u8, _buf: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ()> {
-        Err(())
+    async fn command(&mut self, _resource: Resource, _cmd: u8, _buf: &mut Reader<'_>, _res: &mut Writer<'_>) -> Result<(), ErrorByte> {
+        Err(viking_protocol::errors::ERR_INVALID_COMMAND)
     }
 }
 
@@ -164,16 +164,16 @@ macro_rules! viking{
                 )*
             }
 
-            async fn command(&mut self, resource: crate::common::Resource, command: u8, req: &mut crate::common::Reader<'_>, res: &mut crate::common::Writer<'_>) -> Result<(), ()> {
+            async fn command(&mut self, resource: crate::common::Resource, command: u8, req: &mut crate::common::Reader<'_>, res: &mut crate::common::Writer<'_>) -> Result<(), u8> {
                 use crate::common::resources::ResourceMode;
                 match resource.id() {
                     $(
                         res_id if res_id == const { ${index()} + 1 } => match &mut self.$resource_name {
                             $(Some(resources::$resource_name::$mode_name(s)) => s.command(resource, command, req, res).await,)*
-                            _ => Err(())
+                            _ => Err(viking_protocol::errors::ERR_INVALID_MODE)
                         }
                     )*
-                    _ => Err(())
+                    _ => Err(viking_protocol::errors::ERR_INVALID_RESOURCE),
                 }
             }
         }
