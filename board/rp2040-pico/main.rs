@@ -5,6 +5,7 @@
 
 use zeptos::rp::gpio::*;
 use zeptos::rp::i2c::{I2c0, I2c1};
+use zeptos::rp::spi::{Spi0, Spi1};
 
 const PRODUCT_STRING: &'static str = "RP2040 Pico (Viking)";
 const CMD_BUF_SIZE: usize = 64 * 1024;
@@ -13,7 +14,7 @@ const EVT_BUF_SIZE: usize = 64 * 1024;
 
 mod common;
 mod rp;
-use rp::{Gpio, LevelInterrupt, Led, I2c, I2cSdaPin, I2cSclPin, Platform};
+use rp::{Gpio, LevelInterrupt, Led, I2c, I2cSdaPin, I2cSclPin, Spi, SpiSckPin, SpiSdiPin, SpiSdoPin, Platform};
 
 #[zeptos::main]
 async fn main(rt: zeptos::Runtime, hw: zeptos::Hardware) {
@@ -26,7 +27,7 @@ viking!{
         gpio: Gpio<GPIO00>,
         level_int: LevelInterrupt<GPIO00>,
         i2c0_sda: I2cSdaPin<GPIO00, I2c0>,
-        // spi0_rx
+        spi0_sdi: SpiSdiPin<GPIO00, Spi0>,
         // uart0_tx
     }
 
@@ -41,23 +42,21 @@ viking!{
         gpio: Gpio<GPIO02>,
         level_int: LevelInterrupt<GPIO02>,
         i2c1_sda: I2cSdaPin<GPIO02, I2c1>,
-        // spi0_sck
+        spi0_sck: SpiSckPin<GPIO02, Spi0>,
     }
 
     resource gp3 {
         gpio: Gpio<GPIO03>,
         level_int: LevelInterrupt<GPIO03>,
         i2c1_scl: I2cSclPin<GPIO03, I2c1>,
-
-        // spi0_tx
+        spi0_sdo: SpiSdoPin<GPIO03, Spi0>,
     }
 
     resource gp4 {
         gpio: Gpio<GPIO04>,
         level_int: LevelInterrupt<GPIO04>,
         i2c0_sda: I2cSdaPin<GPIO04, I2c0>,
-
-        // spi0_rx
+        spi0_sdi: SpiSdiPin<GPIO04, Spi0>,
         // uart1_tx
     }
 
@@ -65,7 +64,6 @@ viking!{
         gpio: Gpio<GPIO05>,
         level_int: LevelInterrupt<GPIO05>,
         i2c0_scl: I2cSclPin<GPIO05, I2c0>,
-
         // uart1_rx
     }
 
@@ -73,24 +71,21 @@ viking!{
         gpio: Gpio<GPIO06>,
         level_int: LevelInterrupt<GPIO06>,
         i2c1_sda: I2cSdaPin<GPIO06, I2c1>,
-
-        // spi0_sck
+        spi0_sck: SpiSckPin<GPIO06, Spi0>,
     }
 
     resource gp7 {
         gpio: Gpio<GPIO07>,
         level_int: LevelInterrupt<GPIO07>,
         i2c1_scl: I2cSclPin<GPIO07, I2c1>,
-
-        // spi0_tx
+        spi0_sdo: SpiSdoPin<GPIO07, Spi0>,
     }
 
     resource gp8 {
         gpio: Gpio<GPIO08>,
         level_int: LevelInterrupt<GPIO08>,
         i2c0_sda: I2cSdaPin<GPIO08, I2c0>,
-
-        // spi1_rx
+        spi1_sdi: SpiSdiPin<GPIO08, Spi1>,
         // uart1_tx
     }
 
@@ -98,7 +93,6 @@ viking!{
         gpio: Gpio<GPIO09>,
         level_int: LevelInterrupt<GPIO09>,
         i2c0_scl: I2cSclPin<GPIO09, I2c0>,
-
         // uart1_rx
     }
 
@@ -106,22 +100,20 @@ viking!{
         gpio: Gpio<GPIO10>,
         level_int: LevelInterrupt<GPIO10>,
         i2c1_sda: I2cSdaPin<GPIO10, I2c1>,
-
-        // spi1_sck
+        spi1_sck: SpiSckPin<GPIO10, Spi1>,
     }
 
     resource gp11 {
         gpio: Gpio<GPIO11>,
         i2c1_scl: I2cSclPin<GPIO11, I2c1>,
-        // spi1_tx
+        spi1_sdo: SpiSdoPin<GPIO11, Spi1>,
     }
 
     resource gp12 {
         gpio: Gpio<GPIO12>,
         level_int: LevelInterrupt<GPIO12>,
         i2c0_sda: I2cSdaPin<GPIO12, I2c0>,
-
-        // spi1_rx
+        spi1_sdi: SpiSdiPin<GPIO12, Spi1>,
         // uart0_tx
     }
 
@@ -129,7 +121,6 @@ viking!{
         gpio: Gpio<GPIO13>,
         level_int: LevelInterrupt<GPIO13>,
         i2c0_scl: I2cSclPin<GPIO13, I2c0>,
-
         // uart0_rx
     }
 
@@ -137,24 +128,21 @@ viking!{
         gpio: Gpio<GPIO14>,
         level_int: LevelInterrupt<GPIO14>,
         i2c1_sda: I2cSdaPin<GPIO14, I2c1>,
-
-        // spi1_sck
+        spi1_sck: SpiSckPin<GPIO14, Spi1>,
     }
 
     resource gp15 {
         gpio: Gpio<GPIO15>,
         level_int: LevelInterrupt<GPIO15>,
         i2c1_scl: I2cSclPin<GPIO15, I2c1>,
-
-        // spi1_tx
+        spi1_sdo: SpiSdoPin<GPIO15, Spi1>,
     }
 
     resource gp16 {
         gpio: Gpio<GPIO16>,
         level_int: LevelInterrupt<GPIO16>,
         i2c0_sda: I2cSdaPin<GPIO16, I2c0>,
-
-        // spi0_rx
+        spi0_sdi: SpiSdiPin<GPIO16, Spi0>,
         // uart0_tx
     }
 
@@ -162,7 +150,6 @@ viking!{
         gpio: Gpio<GPIO17>,
         level_int: LevelInterrupt<GPIO17>,
         i2c0_scl: I2cSclPin<GPIO17, I2c0>,
-
         // uart0_rx
     }
 
@@ -170,16 +157,14 @@ viking!{
         gpio: Gpio<GPIO18>,
         level_int: LevelInterrupt<GPIO18>,
         i2c1_sda: I2cSdaPin<GPIO18, I2c1>,
-
-        // spi0_sck
+        spi0_sck: SpiSckPin<GPIO18, Spi0>,
     }
 
     resource gp19 {
         gpio: Gpio<GPIO19>,
         level_int: LevelInterrupt<GPIO19>,
         i2c1_scl: I2cSclPin<GPIO19, I2c1>,
-
-        // spi0_tx
+        spi0_sdo: SpiSdoPin<GPIO19, Spi0>,
     }
 
     resource gp20 {
@@ -227,19 +212,19 @@ viking!{
     }
 
     resource spi0 {
-
+        controller: Spi<Spi0>,
     }
 
     resource spi1 {
-
+        controller: Spi<Spi1>,
     }
 
     resource i2c0 {
-
+        controller: I2c<I2c0>,
     }
 
     resource i2c1 {
-
+        controller: I2c<I2c1>,
     }
 
     resource uart0 {

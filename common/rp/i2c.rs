@@ -97,7 +97,7 @@ impl<I: i2c::StaticInstance> ResourceMode for I2c<I> {
             }
             cmd::READ => {
                 debug!("i2c read in state {:?}", self.state);
-                let len = req.take_first().ok_or(ERR_MISSING_ARG)? as u8;
+                let len = req.take_first().ok_or(ERR_MISSING_ARG)?;
 
                 let mut restart = match self.state{
                     State::Read => false,

@@ -6,6 +6,9 @@ pub use gpio::{Gpio, LevelInterrupt, Led};
 mod i2c;
 pub use i2c::{I2c, I2cSdaPin, I2cSclPin};
 
+mod spi;
+pub use spi::{Spi, SpiSckPin, SpiSdoPin, SpiSdiPin};
+
 pub struct Platform {
 
 }

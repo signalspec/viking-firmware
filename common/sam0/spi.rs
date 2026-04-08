@@ -21,10 +21,8 @@ impl<S: Sercom, const DOPO: u8, const DIPO: u8> ResourceMode for SercomSPI<S, DO
         const_bytes!(
             spi::controller::DescribeMode {
                 flags: ModeFlags::MODE0.union(ModeFlags::MSB_FIRST),
-                base_clock: U32::new(0x48_000_000 / 2),
-                min_div: U32::new(1),
+                base_clock: U32::new(zeptos::CLOCK_HZ / 2),
                 max_div: U32::new(256),
-                max_div_pow: 0,
             }
         )
     };

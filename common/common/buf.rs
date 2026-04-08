@@ -43,6 +43,20 @@ impl<'a> Writer<'a> {
             Err(())
         }
     }
+
+    pub fn remaining(&self) -> usize {
+        unsafe { self.end.offset_from_unsigned(self.pos) }
+    }
+
+    pub fn reserve_buf(&mut self, n: usize) -> Result<&'a mut [u8], ()> {
+        if self.remaining() >= n {
+            let r = unsafe { slice::from_raw_parts_mut(self.pos, n) };
+            self.pos = unsafe { self.pos.add(n) };
+            Ok(r)
+        } else {
+            Err(())
+        }
+    }
 }
 
 pub struct Reader<'a> {
