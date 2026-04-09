@@ -174,7 +174,7 @@ async fn start(sercom: DynSercom, addr: u8, state: &mut State) -> u8 {
 
     sync_sysop(regs);
 
-    sercom.notify().until(|| {
+    sercom.interrupt().until(|| {
         let flags = regs.intflag.read();
         flags.mb().bit_is_set() | flags.sb().bit_is_set() | flags.error().bit_is_set()
     }).await;
@@ -204,7 +204,7 @@ async fn write(sercom: DynSercom, data: &[u8], state: &mut State) -> Result<(), 
 
         regs.intenset.write(|w| { w.mb().set_bit() });
 
-        sercom.notify().until(|| {
+        sercom.interrupt().until(|| {
             regs.intflag.read().mb().bit_is_set()
         }).await;
 
@@ -226,7 +226,7 @@ async fn read(sercom: DynSercom, n: u8, writer: &mut Writer<'_>, state: &mut Sta
             regs.ctrlb.write(|w| w.cmd().variant(0x02));
             sync_sysop(regs);
             regs.intenset.write(|w| { w.sb().set_bit() });
-            sercom.notify().until(|| {
+            sercom.interrupt().until(|| {
                 regs.intflag.read().sb().bit_is_set()
             }).await;
         } else if *state == State::ReadFirst {

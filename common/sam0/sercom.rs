@@ -28,7 +28,7 @@ impl DynSercom {
         unsafe { &*(SERCOM0::PTR.byte_offset((SERCOM1::PTR as usize - SERCOM0::PTR as usize) as isize * self.0 as isize) ) }
     }
 
-    pub(crate) fn notify(&self) -> &Interrupt {
+    pub(crate) fn interrupt(&self) -> &Interrupt {
         unsafe { &INT.get_unchecked()[self.0] }
     }
 }
@@ -49,4 +49,3 @@ fn SERCOM1() {
 fn SERCOM2() {
     unsafe { INT.get_unchecked()[2].notify() };
 }
-

@@ -43,8 +43,18 @@ impl<S: Sercom, const DOPO: u8, const DIPO: u8> ResourceMode for SercomSPI<S, DO
         let sercom = DynSercom(S::NUM);
 
         match command {
-            cmd::TRANSFER => {
-                transfer(sercom, req, res).await?;
+            cmd::TRANSFER | cmd::READ | cmd::WRITE => {
+                let len = req.take_first().ok_or(ERR_MISSING_ARG)?;
+
+                for _ in 0..len {
+                    let tx_byte = if command == cmd::READ { 0 } else {
+                        req.take_first().ok_or(ERR_MISSING_ARG)?
+                    };
+                    let rx_byte = transfer_byte(&sercom, tx_byte).await;
+                    if command != cmd::WRITE {
+                        res.put(rx_byte)?;
+                    }
+                }
                 Ok(0)
             }
             _ => Err(ERR_INVALID_COMMAND)
@@ -123,23 +133,18 @@ fn deinit(sercom: DynSercom) {
     sercom.regs().spi().ctrla.write(|w| w.swrst().set_bit());
 }
 
-async fn transfer(sercom: DynSercom, request: &mut Reader<'_>, response: &mut Writer<'_>) -> Result<(), ErrorByte> {
+async fn transfer_byte(sercom: &DynSercom, out: u8) -> u8 {
     let regs = sercom.regs().spi();
+    regs.data.write(|w| w.data().variant(out as u16));
 
-    let len = request.take_first().ok_or(ERR_MISSING_ARG)? as u8;
+    sercom.interrupt().until(|| {
+        if regs.intflag.read().txc().bit_is_set() {
+            true
+        } else {
+            regs.intenset.write(|w| { w.txc().set_bit() });
+            false
+        }
+    }).await;
 
-    for _ in 0..len {
-        let so_byte = request.take_first().ok_or(ERR_MISSING_ARG)?;
-        regs.data.write(|w| w.data().variant(so_byte as u16));
-
-        regs.intenset.write(|w| { w.txc().set_bit() });
-        sercom.notify().until(|| {
-            regs.intflag.read().txc().bit_is_set()
-        }).await;
-
-        let si_byte = regs.data.read().data().bits() as u8;
-        response.put(si_byte)?;
-    }
-
-    Ok(())
+    regs.data.read().data().bits() as u8
 }
