@@ -1,15 +1,14 @@
-use core::{cell::Cell, marker::PhantomData};
+use core::marker::PhantomData;
 
-use zeptos::samd::{gpio::TypePin, pac::sercom0::I2CM};
-use zeptos::samd::gpio:: AlternateFunc ;
+use zeptos::samd::gpio::{TypePin, AlternateFunc};
+use zeptos::samd::sercom::{Sercom, StaticSercom, I2cController, I2cError};
 use defmt::{debug, info, Format};
 
 use viking_protocol::protocol::i2c;
-use viking_protocol::errors::{ERR_INVALID_COMMAND, ERR_MISSING_ARG, ERR_INVALID_STATE};
+use viking_protocol::errors::{ERR_INVALID_COMMAND, ERR_MISSING_ARG, ERR_INVALID_STATE, ERR_ADDR_NACK, ERR_DATA_NACK, ERR_ARBITRATION_LOST};
 
 use crate::const_bytes;
 use crate::common::{Reader, Resource, ResourceMode, Writer, ErrorByte};
-use super::sercom::{ Sercom, DynSercom };
 
 #[derive(Clone, Copy, Debug, PartialEq, Format)]
 enum State {
@@ -17,14 +16,16 @@ enum State {
     Read,
     ReadFirst,
     Write,
-    Nack,
+    AddrNack,
+    ArbitrationLost,
 }
-pub struct SercomI2C<S> {
-    _p: PhantomData<S>,
+
+pub struct SercomI2C<S: StaticSercom> {
+    i2c: I2cController<S>,
     state: State,
 }
 
-impl<S: Sercom> ResourceMode for SercomI2C<S> {
+impl<S: StaticSercom> ResourceMode for SercomI2C<S> {
     const PROTOCOL: u16 = i2c::controller::PROTOCOL;
     const DESCRIPTOR: &[u8] = {
         use i2c::controller::{ModeFlags, SpeedFlags};
@@ -45,42 +46,113 @@ impl<S: Sercom> ResourceMode for SercomI2C<S> {
 
     fn init(_resource: Resource, _config: &[u8]) -> Result<Self, ErrorByte> {
         info!("i2c init");
-        init(DynSercom(S::NUM));
-        Ok(SercomI2C { _p: PhantomData, state: State::Idle })
+        let sercom = unsafe { S::steal() };
+        let i2c = I2cController::new(sercom);
+        Ok(SercomI2C { i2c, state: State::Idle })
     }
 
     fn deinit(self, _resource: Resource) {
         info!("i2c deinit");
-        deinit(DynSercom(S::NUM));
     }
 
     async fn command(&mut self, _resource: Resource, command: u8, req: &mut Reader<'_>, res: &mut Writer<'_>) -> Result<u8, ErrorByte> {
         use i2c::controller::cmd;
-        let sercom = DynSercom(S::NUM);
 
         match command {
             cmd::START => {
                 let addr = req.take_first().ok_or(ERR_MISSING_ARG)?;
-                debug!("i2c start {:x} {:?}", addr, self.state);
-                let r = start(sercom, addr, &mut self.state).await;
-                debug!("i2c start -> {} {:?}", r, self.state);
-                Ok(r)
+                debug!("i2c start {:x}", addr);
+
+                match self.i2c.start(addr).await {
+                    Ok(()) => {
+                        debug!("i2c start -> ack");
+                        self.state = if addr & 0x01 != 0 { State::ReadFirst } else { State::Write };
+                        Ok(0)
+                    }
+                    Err(I2cError::NoAcknowledge) => {
+                        debug!("i2c addr nack");
+                        self.state = State::AddrNack;
+                        Ok(ERR_ADDR_NACK) // non-fatal
+                    }
+                    Err(I2cError::ArbitrationLost) => {
+                        debug!("i2c addr arbitration lost");
+                        self.state = State::ArbitrationLost;
+                        Err(ERR_ARBITRATION_LOST)
+                    }
+                }
             }
             cmd::STOP => {
-                debug!("i2c stop {:?}", self.state);
-                stop(sercom, &mut self.state).await;
+                debug!("i2c stop");
+                self.i2c.stop();
                 Ok(0)
             }
             cmd::READ => {
-                debug!("i2c read {:?}", self.state);
                 let len = req.take_first().ok_or(ERR_MISSING_ARG)? as u8;
-                read(sercom, len, res, &mut self.state).await?;
+                for _ in 0..len {
+                    let r = match self.state {
+                        State::ReadFirst => {
+                            self.state = State::Read;
+                            Ok(self.i2c.read_first())
+                        }
+                        State::Read => self.i2c.read_next().await,
+                        State::AddrNack => {
+                            return Err(ERR_ADDR_NACK);
+                        }
+                        State::ArbitrationLost => {
+                            return Err(ERR_ARBITRATION_LOST);
+                        }
+                        _ => return Err(ERR_INVALID_STATE),
+                    };
+
+                    match r {
+                        Ok(byte) => {
+                            debug!("i2c read byte -> {:02x}", byte);
+                            res.put(byte)?;
+                        }
+                        Err(I2cError::NoAcknowledge) => {
+                            debug!("i2c data nack");
+                            return Err(ERR_DATA_NACK);
+                        }
+                        Err(I2cError::ArbitrationLost) => {
+                            debug!("i2c read arbitration lost");
+                            self.state = State::ArbitrationLost;
+                            return Err(ERR_ARBITRATION_LOST);
+                        }
+                    }
+                }
                 Ok(0)
             }
             cmd::WRITE => {
-                debug!("i2c write {:?}", self.state);
                 let buf = req.take_len().ok_or(ERR_MISSING_ARG)?;
-                let written = write(sercom, buf, &mut self.state).await?;
+
+                match self.state {
+                    State::Write => (),
+                    State::AddrNack => {
+                        return Err(ERR_ADDR_NACK);
+                    }
+                    State::ArbitrationLost => {
+                        return Err(ERR_ARBITRATION_LOST);
+                    }
+                    _ => return Err(ERR_INVALID_STATE),
+                };
+
+                for &b in buf {
+                    match self.i2c.write(b).await {
+                        Ok(()) => {
+                            debug!("i2c write byte {:02x} -> ack", b);
+                        }
+                        Err(I2cError::NoAcknowledge) => {
+                            debug!("i2c write byte {:02x} -> nack", b);
+                            return Err(ERR_DATA_NACK);
+                        }
+                        Err(I2cError::ArbitrationLost) => {
+                            debug!("i2c write byte {:02x} -> arbitration lost", b);
+                            self.state = State::ArbitrationLost;
+                            return Err(ERR_ARBITRATION_LOST);
+                        }
+                    }
+                }
+
                 Ok(0)
             }
             _ => Err(ERR_INVALID_COMMAND)
@@ -120,140 +192,4 @@ impl<P: TypePin, S, M: AlternateFunc> ResourceMode for SercomSDAPin<P, S, M> {
     fn deinit(self, _resource: Resource) {
         P::set_io();
     }
-}
-
-fn init(sercom: DynSercom) {
-    let regs = sercom.regs().i2cm();
-    regs.ctrla.write(|w| w.mode().i2c_master());
-    regs.baud.write(|w| w.baud().variant(235) ); // 100kHz
-    regs.ctrla.write(|w|
-        w.mode().i2c_master()
-        .enable().set_bit()
-    );
-
-    while regs.syncbusy.read().enable().bit_is_set() {}
-    regs.status.write(|w| w.busstate().variant(1) ); // set idle
-    while regs.syncbusy.read().sysop().bit_is_set() {}
-}
-
-fn deinit(sercom: DynSercom) {
-    sercom.regs().i2cm().ctrla.write(|w| w.swrst().set_bit());
-}
-
-fn check_error(regs: &I2CM) -> Result<(), ()> {
-    let status = regs.status.read();
-    if status.buserr().bit_is_set() {
-        debug!("buserr");
-        return Err(());
-    }
-    if status.arblost().bit_is_set() {
-        debug!("arblost");
-        return Err(());
-    }
-    if status.rxnack().bit_is_set() {
-        debug!("rxnack");
-        return Err(());
-    }
-    Ok(())
-}
-
-#[inline]
-fn sync_sysop(regs: &I2CM) {
-    while regs.syncbusy.read().sysop().bit_is_set() {}
-}
-
-async fn start(sercom: DynSercom, addr: u8, state: &mut State) -> u8 {
-    let regs = sercom.regs().i2cm();
-
-    regs.addr.write(|w| w.addr().variant(addr as u16));
-    regs.intenset.write(|w| {
-        w.mb().set_bit();
-        w.sb().set_bit();
-        w.error().set_bit()
-    });
-
-    sync_sysop(regs);
-
-    sercom.interrupt().until(|| {
-        let flags = regs.intflag.read();
-        flags.mb().bit_is_set() | flags.sb().bit_is_set() | flags.error().bit_is_set()
-    }).await;
-
-    if check_error(regs).is_err() {
-        *state = State::Nack;
-        1
-    } else if addr & 0x01 != 0 {
-        *state = State::ReadFirst;
-        0
-    } else {
-        *state = State::Write;
-        0
-    }
-}
-
-async fn write(sercom: DynSercom, data: &[u8], state: &mut State) -> Result<(), ErrorByte> {
-    let regs = sercom.regs().i2cm();
-
-    for &b in data {
-        if *state != State::Write {
-            return Err(ERR_INVALID_STATE)
-        }
-
-        regs.data.write(|w| w.data().variant(b));
-        sync_sysop(regs);
-
-        regs.intenset.write(|w| { w.mb().set_bit() });
-
-        sercom.interrupt().until(|| {
-            regs.intflag.read().mb().bit_is_set()
-        }).await;
-
-        if check_error(regs).is_err() {
-            *state = State::Nack;
-            break;
-        }
-    }
-
-    Ok(())
-}
-
-async fn read(sercom: DynSercom, n: u8, writer: &mut Writer<'_>, state: &mut State) -> Result<(), ErrorByte> {
-    let regs = sercom.regs().i2cm();
-
-    for _ in 0..n {
-        if *state == State::Read {
-            // Ack previous byte, read the next
-            regs.ctrlb.write(|w| w.cmd().variant(0x02));
-            sync_sysop(regs);
-            regs.intenset.write(|w| { w.sb().set_bit() });
-            sercom.interrupt().until(|| {
-                regs.intflag.read().sb().bit_is_set()
-            }).await;
-        } else if *state == State::ReadFirst {
-            // First byte has already been read
-            *state = State::Read;
-        } else {
-            return Err(ERR_INVALID_STATE)
-        }
-
-        writer.put(regs.data.read().data().bits())?;
-
-        if check_error(regs).is_err() {
-            *state = State::Nack;
-        }
-    }
-
-    Ok(())
-}
-
-async fn stop(sercom: DynSercom, state: &mut State) {
-    let regs = sercom.regs().i2cm();
-
-    regs.ctrlb.write(|w| {
-        w.ackact().set_bit(); // send nack if read
-        w.cmd().variant(0x3)
-    });
-    sync_sysop(regs);
-
-    *state = State::Idle;
 }
