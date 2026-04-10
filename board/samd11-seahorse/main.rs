@@ -52,10 +52,10 @@ viking!{
     }
 
     resource spi {
-        spi: sam0::SercomSPI<Sercom0, 2, 2>,
+        spi: sam0::SercomSPI<Sercom0, 2, 2, false>,
     }
 
     resource i2c {
-        i2c: sam0::SercomI2C<Sercom1>,
+        i2c: sam0::SercomI2C<Sercom1, false>,
     }
 }

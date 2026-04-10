@@ -10,17 +10,18 @@ use viking_protocol::errors::{ERR_INVALID_COMMAND, ERR_MISSING_ARG};
 use crate::const_bytes;
 use crate::common::{Reader, Resource, ResourceMode, Writer, ErrorByte, req_from_bytes};
 
-pub struct SercomSPI<S: StaticSercom, const DOPO: u8, const DIPO: u8> {
+pub struct SercomSPI<S: StaticSercom, const DOPO: u8, const DIPO: u8, const PIN_MUX: bool> {
     spi: SpiController<S>,
 }
 
-impl<S: StaticSercom, const DOPO: u8, const DIPO: u8> ResourceMode for SercomSPI<S, DOPO, DIPO> {
+impl<S: StaticSercom, const DOPO: u8, const DIPO: u8, const PIN_MUX: bool> ResourceMode for SercomSPI<S, DOPO, DIPO, PIN_MUX> {
     const PROTOCOL: u16 = spi_proto::controller::PROTOCOL;
     const DESCRIPTOR: &'static [u8] = {
         use spi_proto::controller::ModeFlags;
         const_bytes!(
             spi_proto::controller::DescribeMode {
-                flags: ModeFlags::MODE0
+                flags: if PIN_MUX { ModeFlags::PINS } else { ModeFlags::EMPTY }
+                    .union(ModeFlags::MODE0)
                     .union(ModeFlags::MODE1)
                     .union(ModeFlags::MODE2)
                     .union(ModeFlags::MODE3)

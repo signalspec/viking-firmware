@@ -20,18 +20,19 @@ enum State {
     ArbitrationLost,
 }
 
-pub struct SercomI2C<S: StaticSercom> {
+pub struct SercomI2C<S: StaticSercom, const PIN_MUX: bool> {
     i2c: I2cController<S>,
     state: State,
 }
 
-impl<S: StaticSercom> ResourceMode for SercomI2C<S> {
+impl<S: StaticSercom, const PIN_MUX: bool> ResourceMode for SercomI2C<S, PIN_MUX> {
     const PROTOCOL: u16 = i2c::controller::PROTOCOL;
     const DESCRIPTOR: &[u8] = {
         use i2c::controller::{ModeFlags, SpeedFlags};
         const_bytes!(
             i2c::controller::DescribeMode {
-                flags: ModeFlags::CLOCK_STRETCH
+                flags: if PIN_MUX { ModeFlags::PINS } else { ModeFlags::EMPTY }
+                    .union(ModeFlags::CLOCK_STRETCH)
                     .union(ModeFlags::SPLIT)
                     .union(ModeFlags::WRITE_THEN_READ)
                     .union(ModeFlags::REPEATED_START)
