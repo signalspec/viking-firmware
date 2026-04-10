@@ -7,12 +7,12 @@ edition = "2024"
 [dependencies]
 cortex-m = { version = "0.7", features = ["critical-section-single-core", "inline-asm"] }
 cortex-m-rt = "0.7"
-zeptos = { version = "0.1", features = ["samd21", "usb", "time", "sercom0", "sercom1", "sercom2", "sercom5", "samd-clock-48m-usb"] }
+zeptos = { version = "0.1", git = "https://github.com/kevinmehall/zeptos.git", rev = "f89885117fc26d71fe1e842e8d765efc65029076", features = ["samd21", "usb", "time", "sercom0", "sercom1", "sercom2", "sercom5", "samd-clock-48m-usb"] }
 defmt = "1.0.1"
 defmt-rtt = "1.0.0"
 futures-util = { version = "0.3.30", default-features = false, features = ["async-await", "async-await-macro"] }
 panic-probe = { version = "1.0" }
-viking-protocol = "0.1"
+viking-protocol = { version = "0.1", git = "https://github.com/signalspec/viking.git", rev = "ea46112196fd0d431fa9ee823b6480917fadcedc"}
 zerocopy = "0.8.6"
 usb = "0.3"
 scopeguard = { version = "1.2.0", default-features = false }

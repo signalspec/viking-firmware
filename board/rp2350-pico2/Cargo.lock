@@ -413,6 +413,7 @@ dependencies = [
 [[package]]
 name = "viking-protocol"
 version = "0.1.0"
+source = "git+https://github.com/signalspec/viking.git?rev=ea46112196fd0d431fa9ee823b6480917fadcedc#ea46112196fd0d431fa9ee823b6480917fadcedc"
 dependencies = [
  "bitflags 2.9.0",
  "zerocopy",
@@ -436,6 +437,7 @@ dependencies = [
 [[package]]
 name = "zeptos"
 version = "0.1.0"
+source = "git+https://github.com/kevinmehall/zeptos.git?rev=f89885117fc26d71fe1e842e8d765efc65029076#f89885117fc26d71fe1e842e8d765efc65029076"
 dependencies = [
  "cortex-m",
  "cortex-m-rt",
@@ -450,6 +452,7 @@ dependencies = [
 [[package]]
 name = "zeptos-macros"
 version = "0.1.0"
+source = "git+https://github.com/kevinmehall/zeptos.git?rev=f89885117fc26d71fe1e842e8d765efc65029076#f89885117fc26d71fe1e842e8d765efc65029076"
 dependencies = [
  "darling",
  "proc-macro2",

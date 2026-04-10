@@ -1,0 +1,36 @@
+name: Rust
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        persist-credentials: false
+    - name: Install picotool
+      run: |
+          curl -L -o /tmp/picotool.tar.gz https://github.com/raspberrypi/pico-sdk-tools/releases/download/v2.2.0-3/picotool-2.2.0-a4-x86_64-lin.tar.gz
+          echo "f4a6784fbb862520b797bfb3302c5b94f47664692d85d03c0a7fbee98065568d  /tmp/picotool.tar.gz" | sha256sum -c -
+          mkdir -p $HOME/picotool
+          tar -xzf /tmp/picotool.tar.gz -C $HOME/picotool/
+          echo "$HOME/picotool/picotool" >> $GITHUB_PATH
+    - name: Build
+      run: |
+          cargo xtask dist
+          echo "## Build size" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          size dist/*.elf >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+    - name: Upload artifacts
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+      with:
+        path: dist/*
