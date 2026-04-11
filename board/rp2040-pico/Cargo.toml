@@ -7,7 +7,7 @@ edition = "2024"
 [dependencies]
 cortex-m = { version = "0.7", features = ["critical-section-single-core", "inline-asm"] }
 cortex-m-rt = "0.7"
-zeptos = { version = "0.1", git = "https://github.com/kevinmehall/zeptos.git", rev = "f89885117fc26d71fe1e842e8d765efc65029076", features = ["rp2040", "usb", "time", "gpio-interrupts", "i2c0", "i2c1", "spi0", "spi1", "rp2040-boot2-w25q080"] }
+zeptos = { version = "0.1", git = "https://github.com/kevinmehall/zeptos.git", rev = "271f8d4defd22613e54e693db5d6fefa8cba09d0", features = ["rp2040", "usb", "time", "gpio-interrupts", "i2c0", "i2c1", "spi0", "spi1", "rp2040-boot2-w25q080"] }
 defmt = "1.0.1"
 defmt-rtt = "1.0.0"
 futures-util = { version = "0.3.30", default-features = false, features = ["async-await", "async-await-macro"] }

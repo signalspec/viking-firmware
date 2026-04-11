@@ -437,7 +437,7 @@ dependencies = [
 [[package]]
 name = "zeptos"
 version = "0.1.0"
-source = "git+https://github.com/kevinmehall/zeptos.git?rev=f89885117fc26d71fe1e842e8d765efc65029076#f89885117fc26d71fe1e842e8d765efc65029076"
+source = "git+https://github.com/kevinmehall/zeptos.git?rev=271f8d4defd22613e54e693db5d6fefa8cba09d0#271f8d4defd22613e54e693db5d6fefa8cba09d0"
 dependencies = [
  "cortex-m",
  "cortex-m-rt",
@@ -452,7 +452,7 @@ dependencies = [
 [[package]]
 name = "zeptos-macros"
 version = "0.1.0"
-source = "git+https://github.com/kevinmehall/zeptos.git?rev=f89885117fc26d71fe1e842e8d765efc65029076#f89885117fc26d71fe1e842e8d765efc65029076"
+source = "git+https://github.com/kevinmehall/zeptos.git?rev=271f8d4defd22613e54e693db5d6fefa8cba09d0#271f8d4defd22613e54e693db5d6fefa8cba09d0"
 dependencies = [
  "darling",
  "proc-macro2",
