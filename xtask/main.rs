@@ -52,6 +52,7 @@ fn dist() -> Result<(), Box<dyn Error>> {
 
         let status = Command::new("cargo")
             .current_dir(path)
+            .env("DEFMT_LOG", "off")
             .arg("build")
             .arg("--release")
             .arg("-Zunstable-options")
