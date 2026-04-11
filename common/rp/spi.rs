@@ -36,7 +36,8 @@ impl<I: spi::StaticInstance> ResourceMode for Spi<I> {
         info!("spi init");
         let req = req_from_bytes::<spi_proto::controller::Config>(req);
         let mut config = spi::Config::default();
-        config.set_divisor(req.clock_div.get()).map_err(|()| ERR_UNSUPPORTED_CLOCK)?;
+        let div = req.clock_div.get();
+        config.set_divisor(if div != 0 { div } else { spi::Config::BASE_CLOCK_HZ / 1_000_000 }).map_err(|()| ERR_UNSUPPORTED_CLOCK)?;
         config.mode = req.flags.mode();
         let instance = unsafe { I::steal() };
         let controller = spi::Controller::new(instance, config);
