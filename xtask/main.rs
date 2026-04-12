@@ -37,10 +37,29 @@ fn boards() -> Result<Vec<(String, PathBuf)>, Box<dyn Error>> {
     }).collect()
 }
 
+fn get_rustc_print(opt: &'static str) -> Result<String, Box<dyn Error>> {
+    let output = Command::new("rustc")
+        .arg("--print").arg(opt)
+        .output()?;
+
+    if !output.status.success() {
+        return Err(format!("Failed to get rustc --print {}: {}", opt, String::from_utf8_lossy(&output.stderr)).into());
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn get_llvm_tools() -> Result<PathBuf, Box<dyn Error>> {
+    let sysroot = get_rustc_print("sysroot")?;
+    let host = get_rustc_print("host-tuple")?;
+    Ok(PathBuf::from(sysroot).join("lib/rustlib").join(host).join("bin"))
+}
+
 fn dist() -> Result<(), Box<dyn Error>> {
     let mut failed = Vec::new();
 
     let dist_dir = path::absolute("dist")?;
+    let llvm_tools = get_llvm_tools()?;
 
     if dist_dir.exists() {
         fs::remove_dir_all(&dist_dir)?;
@@ -71,6 +90,20 @@ fn dist() -> Result<(), Box<dyn Error>> {
         let orig_path = entry.path();
         let elf_path = orig_path.with_extension("elf");
         fs::rename(orig_path, &elf_path)?;
+
+        let bin_path = elf_path.with_extension("bin");
+
+        let objcopy_success = Command::new(llvm_tools.join("llvm-objcopy"))
+            .arg("-O").arg("binary")
+            .arg(&elf_path)
+            .arg(&bin_path)
+            .status().is_ok_and(|s| s.success());
+
+        if !objcopy_success {
+            eprintln!("Failed to run llvm-objcopy for {}", elf_path.display());
+            failed.push(bin_path.file_name().unwrap().to_string_lossy().to_string());
+            continue;
+        }
 
         if elf_path.file_name().unwrap().to_str().unwrap().starts_with("viking-firmware-rp") {
             let uf2_path = elf_path.with_extension("uf2");

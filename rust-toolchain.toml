@@ -2,3 +2,4 @@
 channel = "nightly-2026-03-29"
 targets = [ "thumbv6m-none-eabi", "thumbv8m.main-none-eabihf" ]
 profile = "minimal"
+components = [ "llvm-tools" ]
